@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 from http.server import HTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from planner import choose, intersects, score, candidate_points, opportunity_score, exploration_points, search_routes, route_grid_cells
+from planner import choose, intersects, score, candidate_points, opportunity_score, exploration_points, search_routes, route_grid_cells, insertion_proposals, route_anchors, LAT_STEP, LON_STEP
 from server import Handler, point, SearchCancelled
 
 CELL = dict(cell_id='test', owner_team='RED', west=0, east=1, south=0, north=1)
@@ -110,6 +110,45 @@ class ExplorationTests(unittest.TestCase):
             return [route(points,100 if len(points)==2 else 99999)]
         result=search_routes(start,end,[],300,router)
         self.assertTrue(all(r['duration']==100 for r in result['routes']))
+
+
+class LocalRefinementTests(unittest.TestCase):
+    def test_samples_middle_of_long_straight_road(self):
+        anchors=route_anchors([[0,0],[.05,0]])
+        self.assertTrue(any(.02 < p[0] < .03 for p in anchors))
+        self.assertLessEqual(len(anchors),102)
+
+    def test_preserves_existing_waypoints_when_inserting(self):
+        start,end=[.001,.001],[.012,.001]
+        via=[[.006,.004]]
+        proposals=insertion_proposals(start,end,route([start,*via,end]),via,[])
+        self.assertTrue(proposals)
+        self.assertTrue(all(via[0] in points and len(points)==2 for points in proposals))
+
+    def test_iterative_refinement_gains_missed_squares_without_more_seed_routes(self):
+        start,end=[.001,.001],[.014,.001]
+        calls=[]
+        def router(points,alternatives=False):
+            calls.append(points)
+            return [route(points,100+20*(len(points)-2))]
+        with patch('planner.exploration_points',return_value=[]):
+            result=search_routes(start,end,[],60,router)
+        self.assertGreater(result['routes'][0]['target_count'],result['baseline']['target_count'])
+        self.assertTrue(any(len(points)>=4 for points in calls))
+        self.assertLessEqual(len(calls),13)  # one baseline + at most 12 refinements
+        self.assertTrue(all(r['duration']<=160 for r in result['routes']))
+        self.assertEqual(calls[0],[start,end])
+        self.assertTrue(all(points[0]==start and points[-1]==end for points in calls))
+
+    def test_no_refinement_can_replace_incumbent_with_worse_route(self):
+        start,end=[.001,.001],[.014,.001]
+        direct=route([start,end])
+        def router(points,alternatives=False):
+            return [direct if len(points)==2 else route([start,end],110)]
+        with patch('planner.exploration_points',return_value=[]):
+            result=search_routes(start,end,[],60,router)
+        self.assertEqual(result['routes'][0]['duration'],100)
+        self.assertEqual(result['routes'][0]['target_count'],result['baseline']['target_count'])
 
 
 class HttpTests(unittest.TestCase):

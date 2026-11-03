@@ -137,6 +137,72 @@ def exploration_points(start, end, cells, budget_seconds, limit=12):
     return selected + candidate_points(start,end,cells,limit=4)
 
 
+def distance_meters(a, b):
+    scale = max(.1, math.cos(math.radians((a[1]+b[1])/2)))
+    return 111320*math.hypot((b[0]-a[0])*scale,b[1]-a[1])
+
+
+def route_anchors(coords):
+    """Sample along road segments, including long straight sections between vertices."""
+    lengths=[distance_meters(a,b) for a,b in zip(coords,coords[1:])]
+    spacing=max(120.,sum(lengths)/100)
+    anchors=[coords[0]]
+    covered=0.
+    next_distance=spacing
+    for a,b,length in zip(coords,coords[1:],lengths):
+        if length:
+            while next_distance<covered+length:
+                t=(next_distance-covered)/length
+                anchors.append([a[i]+t*(b[i]-a[i]) for i in (0,1)])
+                next_distance+=spacing
+        covered+=length
+    anchors.append(coords[-1])
+    return anchors
+
+
+def insertion_proposals(start, end, route, via, cells, limit=4):
+    """Find missed targets near the actual road geometry and insert in trip order."""
+    known = {c['cell_id']:c for c in cells}
+    coords = route['geometry']['coordinates']
+    visited = route_grid_cells(coords)
+    # Bound CPU work on long trips while retaining points from the entire route.
+    anchors = route_anchors(coords)
+    candidates = set()
+    for x,y in anchors:
+        row,col = math.floor(y/LAT_STEP),math.floor(x/LON_STEP)
+        for dy in range(-2,3):
+            for dx in range(-2,3):
+                cell_id=f'{row+dy}_{col+dx}'
+                if cell_id not in visited and known.get(cell_id,{}).get('owner_team') != 'BLUE':
+                    candidates.add((row+dy,col+dx))
+    chain = [start,*via,end]
+    ranked = []
+    for row,col in candidates:
+        point=[(col+.5)*LON_STEP,(row+.5)*LAT_STEP]
+        if abs(point[0])>180 or abs(point[1])>85:
+            continue
+        costs=[distance_meters(a,point)+distance_meters(point,b)-distance_meters(a,b)
+               for a,b in zip(chain,chain[1:])]
+        index=min(range(len(costs)),key=costs.__getitem__)
+        nearby_gain=sum(f'{row+dy}_{col+dx}' not in visited and
+                        known.get(f'{row+dy}_{col+dx}',{}).get('owner_team') != 'BLUE'
+                        for dy in range(-1,2) for dx in range(-1,2))
+        proximity=min(distance_meters(point,a) for a in anchors)
+        # Favor inexpensive side trips into clusters of missed squares.
+        priority=(costs[index]+proximity)/max(1,nearby_gain)
+        ranked.append((priority,row,col,index,point))
+    proposals=[]
+    selected=[]
+    for _,row,col,index,point in sorted(ranked):
+        if any(max(abs(row-r),abs(col-c))<2 for r,c in selected):
+            continue
+        selected.append((row,col))
+        proposals.append(via[:index]+[point]+via[index:])
+        if len(proposals)>=limit:
+            break
+    return proposals
+
+
 def search_routes(start, end, cells, budget_seconds, router, progress=None):
     def report(percent, message):
         if progress:
@@ -160,28 +226,46 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None):
     report(65, 'Scoring detours and selecting route extensions…')
     feasible = [(opportunity_score(r,cells), via) for r,via in trials if r['duration']<=cap+1e-6]
     feasible.sort(key=lambda pair:(-pair[0]['target_count'],pair[0]['duration']))
-    # Build extension jobs up front so progress reports completed requests.
-    extension_jobs = []
-    for r, via in feasible[:2]:
-        used = set(r['target_ids'])
-        extensions = [p for p in points if f'{math.floor(p[1]/LAT_STEP)}_{math.floor(p[0]/LON_STEP)}' not in used]
-        for p in extensions[:3]:
-            extension_jobs.extend(([p]+via, via+[p]) if via else ([p],))
-    for index, waypoints in enumerate(extension_jobs):
-        report(65 + 30*index/max(1,len(extension_jobs)), f'Checking extended route {index+1} of {len(extension_jobs)}…')
-        try:
-            for candidate in router([start,*waypoints,end]):
-                if candidate['duration']<=cap+1e-6:
-                    trials.append((candidate,waypoints))
-        except (ValueError, OSError):
-            failures += 1
-        report(65 + 30*(index+1)/max(1,len(extension_jobs)), f'Checked {index+1} of {len(extension_jobs)} extended routes.')
+    # Repeatedly insert missed nearby cells into the best route. Each round
+    # starts from the improved route, retaining every previous useful waypoint.
+    # Keep the same maximum 12 refinement requests as the former extension pass.
+    refined = list(feasible)
+    seen_jobs = set()
+    completed = 0
+    for round_index in range(3):
+        if not refined or budget_seconds <= 0:
+            break
+        incumbent,via = min(refined,key=lambda pair:(-pair[0]['target_count'],pair[0]['duration'],pair[0]['distance']))
+        jobs = insertion_proposals(start,end,incumbent,via,cells)
+        for waypoints in jobs:
+            key = tuple(tuple(p) for p in waypoints)
+            if key in seen_jobs:
+                continue
+            seen_jobs.add(key)
+            report(65+30*completed/12, f'Checking extended route {completed+1} of up to 12 (local refinement {round_index+1}/3)…')
+            try:
+                for candidate in router([start,*waypoints,end]):
+                    if candidate['duration']<=cap+1e-6:
+                        scored = opportunity_score(candidate,cells)
+                        refined.append((scored,waypoints))
+                        trials.append((candidate,waypoints))
+            except (ValueError,OSError):
+                failures += 1
+            completed += 1
+            best = max((r['target_count'] for r,_ in refined),default=0)
+            report(65+30*completed/12, f'Local refinement: {completed}/12 checks; best route crosses {best} target squares.')
+        winner = min(refined,key=lambda pair:(-pair[0]['target_count'],pair[0]['duration'],pair[0]['distance']))
+        if winner[1] == via:
+            break
     report(95, 'Ranking routes and preparing driving directions…')
     unique = {}
     for r,_ in trials:
         if r['duration']<=cap+1e-6:
             key = str(r['geometry']['coordinates'])
-            unique[key] = opportunity_score(r,cells)
+            scored = opportunity_score(r,cells)
+            previous = unique.get(key)
+            if previous is None or (scored['duration'],scored['distance']) < (previous['duration'],previous['distance']):
+                unique[key] = scored
     ranked = sorted(unique.values(),key=lambda r:(-r['target_count'],r['duration'],r['distance']))
     useful = [r for r in ranked if r['target_count']>0]
     return {'routes': useful[:3], 'baseline':scored_base, 'failed_candidates':failures,
