@@ -172,7 +172,7 @@ class BeamSearchTests(unittest.TestCase):
             elif via==[b,c,d]:count=9
             else:count=1
             return [make_route(count,via)]
-        def proposals(start,end,r,via,cells,limit=4):
+        def proposals(start,end,r,via,cells,limit=4,team='BLUE'):
             if via in ([a],[b]):return [via+[c]]
             if via==[b,c]:return [via+[d]]
             return []
@@ -468,6 +468,15 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(events[0]['type'],'progress')
             self.assertEqual(events[-1]['type'],'result')
             self.assertEqual(events[-1]['team'],'BLUE')
+            for team in ('RED','ORANGE'):
+                selected_body=json.dumps({'start':[.0001,.0001], 'end':[.0002,.0002],
+                                          'team':team,'detour_minutes':0}).encode()
+                selected=json.loads(request('POST','/api/plan',selected_body))
+                self.assertEqual(selected['team'],team)
+                self.assertEqual(selected['no_opportunities'],team=='RED')
+                events=[json.loads(line) for line in request('POST','/api/plan-stream',selected_body).splitlines()]
+                self.assertEqual(events[-1]['team'],team)
+                self.assertEqual(events[-1]['no_opportunities'],team=='RED')
         with patch('server.fetch_routes', side_effect=ValueError('No driving route found')):
             events=[json.loads(line) for line in request('POST','/api/plan-stream',body).splitlines()]
             self.assertEqual(events[-1]['type'],'error')

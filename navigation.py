@@ -1,4 +1,5 @@
 """Portable navigation handoff and lossless GPX track export."""
+from teams import validate_team
 import math
 from urllib.parse import urlencode
 import xml.etree.ElementTree as ET
@@ -25,6 +26,7 @@ def format_location(point):
 def build_export(route):
     if not isinstance(route,dict):
         raise ValueError('Expected a route object.')
+    team=validate_team(route.get('team','BLUE'))
     geometry=route.get('geometry')
     if not isinstance(geometry,dict) or geometry.get('type','LineString')!='LineString':
         raise ValueError('Expected a LineString route.')
@@ -54,12 +56,12 @@ def build_export(route):
             raise ValueError('Navigation link exceeds Google Maps URL limit.')
         sections.append({'url':url,'from_label':labels[start],'to_label':labels[end],
                          'stops':stops,'labels':labels[start:end+1]})
-    root=ET.Element(f'{{{GPX_NS}}}gpx',{'version':'1.1','creator':'MeshWars BLUE Route Planner'})
+    root=ET.Element(f'{{{GPX_NS}}}gpx',{'version':'1.1','creator':f'MeshWars {team} Route Planner'})
     for point,label in zip(points,labels):
         waypoint=ET.SubElement(root,f'{{{GPX_NS}}}wpt',{'lat':str(point[1]),'lon':str(point[0])})
         ET.SubElement(waypoint,f'{{{GPX_NS}}}name').text=label
     track=ET.SubElement(root,f'{{{GPX_NS}}}trk')
-    ET.SubElement(track,f'{{{GPX_NS}}}name').text='MeshWars BLUE planned route'
+    ET.SubElement(track,f'{{{GPX_NS}}}name').text=f'MeshWars {team} planned route'
     ET.SubElement(track,f'{{{GPX_NS}}}desc').text='Imported track of the planned road geometry. Turn-by-turn instructions are not embedded.'
     segment=ET.SubElement(track,f'{{{GPX_NS}}}trkseg')
     for lon,lat in coords:

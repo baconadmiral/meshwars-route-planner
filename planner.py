@@ -1,4 +1,5 @@
-"""Deterministic BLUE opportunity scoring and bounded candidate search."""
+"""Deterministic team opportunity scoring and bounded candidate search."""
+from teams import validate_team
 import math
 import time
 import threading
@@ -21,7 +22,7 @@ def intersects(a, b, cell):
     return True
 
 
-def score(route, cells):
+def score(route, cells, team='BLUE'):
     coords = route['geometry']['coordinates']
     west, east = min(p[0] for p in coords), max(p[0] for p in coords)
     south, north = min(p[1] for p in coords), max(p[1] for p in coords)
@@ -31,25 +32,25 @@ def score(route, cells):
             continue
         if any(intersects(a, b, cell) for a, b in zip(coords, coords[1:])):
             crossed[cell['cell_id']] = cell
-    targets = [c for c in crossed.values() if c['owner_team'] != 'BLUE']
+    targets = [c for c in crossed.values() if c['owner_team'] != team]
     return dict(route, square_count=len(crossed), target_count=len(targets),
                 target_ids=[c['cell_id'] for c in targets])
 
 
-def candidate_points(start, end, cells, limit=8):
-    """Choose spatially separated non-BLUE targets near the trip corridor."""
+def candidate_points(start, end, cells, limit=8, team='BLUE'):
+    """Choose spatially separated opposing targets near the trip corridor."""
     sx, sy = start
     ex, ey = end
     scale = max(.1, math.cos(math.radians((sy+ey)/2)))
     ranked = []
     direct = math.hypot((ex-sx)*scale, ey-sy)
     for c in cells:
-        if target_value(c) == 0:
+        if target_value(c, team=team) == 0:
             continue
         x, y = (c['west']+c['east'])/2, (c['south']+c['north'])/2
         distance = math.hypot((x-sx)*scale, y-sy) + math.hypot((ex-x)*scale, ey-y)
         if distance <= direct + .08:
-            ranked.append((distance/max(.0001,target_value(c)), x, y))
+            ranked.append((distance/max(.0001,target_value(c, team=team)), x, y))
     selected = []
     for _, x, y in sorted(ranked):
         if all(math.hypot((x-p[0])*scale, y-p[1]) > .008 for p in selected):
@@ -59,8 +60,8 @@ def candidate_points(start, end, cells, limit=8):
     return selected
 
 
-def choose(routes, cells, budget_seconds, baseline_seconds):
-    feasible = [score(r, cells) for r in routes if r['duration'] <= baseline_seconds + budget_seconds + 1e-6]
+def choose(routes, cells, budget_seconds, baseline_seconds, team='BLUE'):
+    feasible = [score(r, cells, team=team) for r in routes if r['duration'] <= baseline_seconds + budget_seconds + 1e-6]
     return sorted(feasible, key=lambda r: (-r['target_count'], r['duration'], r['distance']))
 
 
@@ -98,11 +99,11 @@ def owner_score(cell):
     return float(value)
 
 
-def target_value(cell):
+def target_value(cell, team='BLUE'):
     """Heuristic utility, not a probability: sharply discount defended territory."""
     if cell is None:
         return 1.  # Unpainted exploration; coverage remains unverified.
-    if cell.get('owner_team')=='BLUE':
+    if cell.get('owner_team')==team:
         return 0.
     points=owner_score(cell)
     if points is None:
@@ -110,21 +111,21 @@ def target_value(cell):
     return 1. if points<=1 else (1./points)**2
 
 
-def opportunity_score(route, cells):
+def opportunity_score(route, cells, team='BLUE'):
     known = {c['cell_id']: c for c in cells}
     visited = route_grid_cells(route['geometry']['coordinates'])
-    enemy = sorted(k for k in visited if k in known and known[k]['owner_team'] != 'BLUE')
+    enemy = sorted(k for k in visited if k in known and known[k]['owner_team'] != team)
     unmapped = sorted(visited-known.keys())
     easy=sum(owner_score(known[k]) is not None and owner_score(known[k])<=1 for k in enemy)
     hard=sum(owner_score(known[k]) is not None and owner_score(known[k])>1 for k in enemy)
-    value=sum(target_value(known[k]) for k in enemy)+len(unmapped)
+    value=sum(target_value(known[k], team=team) for k in enemy)+len(unmapped)
     return dict(route, square_count=len(visited), target_count=len(enemy)+len(unmapped),
                 target_ids=enemy+unmapped, enemy_count=len(enemy), unmapped_count=len(unmapped),
                 capture_value=value,easy_enemy_count=easy,hard_enemy_count=hard,
                 unknown_score_count=len(enemy)-easy-hard)
 
 
-def exploration_points(start, end, cells, budget_seconds, limit=12):
+def exploration_points(start, end, cells, budget_seconds, limit=12, team='BLUE'):
     """Explore both sides of the trip at multiple budget-dependent distances."""
     known = {c['cell_id']: c for c in cells}
     scale = max(.1, math.cos(math.radians((start[1]+end[1])/2)))
@@ -146,7 +147,7 @@ def exploration_points(start, end, cells, budget_seconds, limit=12):
                 if travel > direct+extra:
                     continue
                 row, col = math.floor(y/LAT_STEP), math.floor(x/LON_STEP)
-                potential = sum(target_value(known.get(f'{row+dy}_{col+dx}'))
+                potential = sum(target_value(known.get(f'{row+dy}_{col+dx}'), team=team)
                                 for dy in range(-2,3) for dx in range(-2,3))
                 if potential:
                     candidates.append((potential, fraction, x, y))
@@ -165,7 +166,7 @@ def exploration_points(start, end, cells, budget_seconds, limit=12):
             if added >= per_band:
                 break
     # Include concrete enemy targets as well as unpainted exploration.
-    return selected + candidate_points(start,end,cells,limit=4)
+    return selected + candidate_points(start,end,cells,limit=4, team=team)
 
 
 def distance_meters(a, b):
@@ -191,7 +192,7 @@ def route_anchors(coords):
     return anchors
 
 
-def insertion_proposals(start, end, route, via, cells, limit=4):
+def insertion_proposals(start, end, route, via, cells, limit=4, team='BLUE'):
     """Find missed targets near the actual road geometry and insert in trip order."""
     known = {c['cell_id']:c for c in cells}
     coords = route['geometry']['coordinates']
@@ -204,7 +205,7 @@ def insertion_proposals(start, end, route, via, cells, limit=4):
         for dy in range(-2,3):
             for dx in range(-2,3):
                 cell_id=f'{row+dy}_{col+dx}'
-                if cell_id not in visited and known.get(cell_id,{}).get('owner_team') != 'BLUE':
+                if cell_id not in visited and known.get(cell_id,{}).get('owner_team') != team:
                     candidates.add((row+dy,col+dx))
     chain = [start,*via,end]
     ranked = []
@@ -215,12 +216,12 @@ def insertion_proposals(start, end, route, via, cells, limit=4):
         costs=[distance_meters(a,point)+distance_meters(point,b)-distance_meters(a,b)
                for a,b in zip(chain,chain[1:])]
         index=min(range(len(costs)),key=costs.__getitem__)
-        nearby_gain=sum(target_value(known.get(f'{row+dy}_{col+dx}'))
+        nearby_gain=sum(target_value(known.get(f'{row+dy}_{col+dx}'), team=team)
                         for dy in range(-1,2) for dx in range(-1,2)
                         if f'{row+dy}_{col+dx}' not in visited)
         proximity=min(distance_meters(point,a) for a in anchors)
         # Favor inexpensive side trips into clusters of missed squares.
-        priority=(costs[index]+proximity)/max(.0001,nearby_gain*target_value(known.get(f'{row}_{col}')))
+        priority=(costs[index]+proximity)/max(.0001,nearby_gain*target_value(known.get(f'{row}_{col}'), team=team))
         ranked.append((priority,row,col,index,point))
     proposals=[]
     selected=[]
@@ -255,7 +256,7 @@ def distinct_states(states, limit):
 def diverse_states(states, limit, minimum_difference=0.):
     """Balance capture value with new territory, always retaining the best route.
 
-    Difference is Jaccard distance over all crossed grid cells, including BLUE.
+    Difference is Jaccard distance over all crossed grid cells, including friendly territory.
     The frontier uses a soft preference; final options require 20% difference.
     """
     ranked=distinct_states(states,len(states)+1)
@@ -309,7 +310,7 @@ def routing_batch(jobs, router, workers, progress):
         executor.shutdown(wait=False,cancel_futures=True)
 
 
-def refine_routes(start, end, cells, seeds, cap, router, strategy, report, workers=4):
+def refine_routes(start, end, cells, seeds, cap, router, strategy, report, workers=4, team='BLUE'):
     """Greedy keeps one incumbent; beam advances six distinct partial routes."""
     width=6 if strategy=='beam' else 1
     maximum=3*4*width
@@ -322,7 +323,7 @@ def refine_routes(start, end, cells, seeds, cap, router, strategy, report, worke
         old_best=min((route_rank(r) for r,_ in all_states),default=None)
         jobs=[]
         for parent,via in frontier:
-            for waypoints in insertion_proposals(start,end,parent,via,cells,limit=4):
+            for waypoints in insertion_proposals(start,end,parent,via,cells,limit=4, team=team):
                 key=tuple(tuple(p) for p in waypoints)
                 if key not in seen_jobs:
                     seen_jobs.add(key)
@@ -340,7 +341,7 @@ def refine_routes(start, end, cells, seeds, cap, router, strategy, report, worke
             else:
                 for candidate in routes:
                     if candidate['duration']<=cap+1e-6:
-                        children.append((opportunity_score(candidate,cells),waypoints))
+                        children.append((opportunity_score(candidate,cells, team=team),waypoints))
         completed+=len(jobs)
         all_states.extend(children)
         if not children:
@@ -374,12 +375,12 @@ def validate_waypoints(waypoints):
     return result
 
 
-def initial_detours(start,end,cells,budget,required):
+def initial_detours(start,end,cells,budget,required, team='BLUE'):
     """Explore each required leg fairly, with a shared bound on routing requests."""
     if not required:
-        return [[p] for p in exploration_points(start,end,cells,budget)]
+        return [[p] for p in exploration_points(start,end,cells,budget, team=team)]
     chain=[start,*required,end]
-    queues=[exploration_points(a,b,cells,budget/(len(chain)-1)) for a,b in zip(chain,chain[1:])]
+    queues=[exploration_points(a,b,cells,budget/(len(chain)-1), team=team) for a,b in zip(chain,chain[1:])]
     result=[]
     for depth in range(max((len(q) for q in queues),default=0)):
         for leg,queue in enumerate(queues):
@@ -402,7 +403,8 @@ def route_stop_labels(via,required):
     return labels
 
 
-def search_routes(start, end, cells, budget_seconds, router, progress=None, strategy='beam', workers=4, waypoints=None):
+def search_routes(start, end, cells, budget_seconds, router, progress=None, strategy='beam', workers=4, waypoints=None, team='BLUE'):
+    team=validate_team(team)
     required=validate_waypoints(waypoints)
     if isinstance(workers,bool) or not isinstance(workers,int) or not 1 <= workers <= 16:
         raise ValueError('Routing workers must be between 1 and 16.')
@@ -442,11 +444,11 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
     report(2,'Finding the fastest baseline through your waypoints…' if required else 'Finding the fastest baseline route…')
     base=cached_router([start,*required,end],not required)
     baseline=min(base,key=lambda r:r['duration'])
-    scored_base=opportunity_score(baseline,cells)
+    scored_base=opportunity_score(baseline,cells, team=team)
     cap=baseline['duration']+budget_seconds
     trials=[(r,list(required)) for r in base]
     failures=0
-    detours=initial_detours(start,end,cells,budget_seconds,required) if budget_seconds else []
+    detours=initial_detours(start,end,cells,budget_seconds,required, team=team) if budget_seconds else []
     report(10,f'Checking {len(detours)} territory detours with up to {workers} routing workers…')
     def exploration_progress(done,total):
         report(10+40*done/max(1,total),f'Checked {done} of {total} territory detours.')
@@ -457,7 +459,7 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
         else:
             trials.extend((r,via) for r in routes)
     report(50,'Scoring shared detours…')
-    seeds=[(opportunity_score(r,cells),via) for r,via in trials if r['duration']<=cap+1e-6]
+    seeds=[(opportunity_score(r,cells, team=team),via) for r,via in trials if r['duration']<=cap+1e-6]
     modes=['greedy','beam'] if strategy=='compare' else [strategy]
     results={}
     shared_requests=provider_requests
@@ -469,7 +471,7 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
         def refine_report(fraction,message):
             report(lower+span*fraction,message)
         if budget_seconds>0:
-            states,stats=refine_routes(start,end,cells,seeds,cap,cached_router,mode,refine_report,workers=workers)
+            states,stats=refine_routes(start,end,cells,seeds,cap,cached_router,mode,refine_report,workers=workers, team=team)
         else:
             states,stats=seeds,{'refinement_requests':0,'failed_candidates':0,'beam_width':6 if mode=='beam' else 1}
         ranked=[r for r,_ in distinct_states(states,len(states)+1)]
@@ -486,7 +488,7 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
     active='beam' if strategy=='compare' else strategy
     report(95,'Ranking routes and preparing driving directions…')
     chosen=results[active]
-    response=dict(chosen,baseline=scored_base,team='BLUE',strategy=active,required_waypoints=required,
+    response=dict(chosen,baseline=scored_base,team=team,strategy=active,required_waypoints=required,
                   shared_provider_requests=shared_requests,total_provider_requests=provider_requests,
                   routing_metrics={'workers':workers,'mean_request_seconds':round(sum(t for t,_ in provider_timings)/max(1,len(provider_timings)),2),
                                    'failed_requests':sum(failed for _,failed in provider_timings)},

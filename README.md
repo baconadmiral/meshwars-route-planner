@@ -1,6 +1,6 @@
-# MeshWars BLUE Route Planner
+# MeshWars Route Planner
 
-A local, MeshCore-first route planner with a territory map and printable, MapQuest-style turn-by-turn directions. It prioritizes easy-to-capture enemy squares and unpainted exploration within a maximum extra-driving-time budget.
+A local, Meshtastic route planner with a territory map and printable, MapQuest-style turn-by-turn directions. It prioritizes easy-to-capture enemy squares and unpainted exploration within a maximum extra-driving-time budget.
 
 ## Run locally
 
@@ -35,21 +35,21 @@ MESHWARS_REFRESH_SECONDS=1800 python3 server.py
 
 Each route search holds the board version present when it starts. Updated scores cannot change the objective midway through a beam search. Existing results are flagged when newer board data arrives; rerun the search to use it. Capture-age and display settings apply to refreshed data immediately. Feed freshness reflects a successful fetch/check, not a guarantee that upstream observations are recent.
 
-## Filter by capturing player
+## Optional capture attribution
 
-**Captured by** combines with the capture-age filter and updates the map immediately. It lists players attributed to current squares, plus **All players** and **Unknown / unattributed**. Your choice persists. This filters display only; route optimization continues using the full board.
+The capturing-player filter has been removed from the interface. Capture-age filtering remains available; any previously saved player filter no longer applies. The optional server integration below remains available for board metadata.
 
 The existing board payload has no player names. The optional integration reads the documented [`/api/v1/captures`](https://meshwars.com/api#captures) endpoint for MeshCore, using a server-side `MESHWARS_API_KEY`. Obtain a read-only integration key from the MeshWars operator, configure it in your local environment, and restart `python3 server.py`. Do not put the key in frontend code, version control, or this chat. `MESHWARS_API_URL` overrides the API base if needed.
 
 Attribution refreshes alongside the board. Events are joined only when both owner team and capture timestamp exactly match the current square. This identifies the last matching capturer, not everyone who ever visited or defended the square. Names and the cursor are cached in Git-ignored `.cache/capture_users.json`; the key is never cached or returned to the browser. Missing/failed attribution does not stop normal board updates.
 
-Coverage is partial: the initial request reads at most 500 recent events; later polls accumulate the latest observed event per square. Older or missed events remain Unknown. The app does not guess names from teams or claim complete historical player coverage. An expired/rejected key is reported beside the dropdown.
+Coverage is partial: the initial request reads at most 500 recent events; later polls accumulate the latest observed event per square. Older or missed events remain Unknown. The app does not guess names from teams or claim complete historical player coverage. An expired/rejected key is recorded in board attribution metadata.
 
 ## Plan a drive
 
-1. Set A and B. Enter an **address or place name**, choose **Find address**, and select the correct match. Include city and state or ZIP code to narrow the results. You can also enter **latitude, longitude** or click the map to set A and B. Mix addresses and coordinates freely. A third map click starts a new pair. Submitting an unresolved address also performs lookup and asks you to choose a match before routing. Editing a selected address clears its saved location.
+1. Select **Your team** (BLUE by default), then set A and B. Enter an **address or place name**, choose **Find address**, and select the correct match. Include city and state or ZIP code to narrow the results. You can also enter **latitude, longitude** or click the map to set A and B. Mix addresses and coordinates freely. A third map click starts a new pair. Submitting an unresolved address also performs lookup and asks you to choose a match before routing. Editing a selected address clears its saved location.
 2. Optionally add ordered manual waypoints using **Add waypoint** or **Pick on map**. Then set the maximum additional driving time, from 0 to 120 minutes. Choose **Beam search** (default), **Greedy** (the previous method), or **Compare beam vs. greedy**.
-3. Choose **Find BLUE opportunities**. A live progress bar shows the search stage and completed detours, with elapsed time and time since the last server update. Slow provider requests display a waiting message. Percentages represent search work, not estimated time remaining. The search may take several minutes if routing requests time out. Use **Cancel search** to stop; a request already sent to the provider may take until its timeout to release the server task.
+3. Choose **Find [your team] opportunities**. A live progress bar shows the search stage and completed detours, with elapsed time and time since the last server update. Slow provider requests display a waiting message. Percentages represent search work, not estimated time remaining. The search may take several minutes if routing requests time out. Use **Cancel search** to stop; a request already sent to the provider may take until its timeout to release the server task.
 4. Compare up to six beam route options (up to three for greedy), the fastest-route baseline, and numbered directions. In Compare mode, a table shows each method’s weighted value, raw target count, driving time, and refinement checks. Use **Show route** to switch the map and directions without rerunning the search.
 5. Print the selected directions or download its GeoJSON line geometry.
 
@@ -79,6 +79,14 @@ For example, place W1 west of your start and W2 farther along the western area b
 
 The time budget is relative to the fastest route **through all manual waypoints**. If that drive takes 30 minutes and you permit 15 extra minutes, results must fit within 45 minutes. An unreachable required route returns an error rather than silently dropping a stop. The map is intended to guide regional exploration; waypoints do not establish radio coverage or forbid every road outside a region. Routing providers may snap the chosen coordinates to nearby roads. Edit stops and run a new search to update an existing plan.
 
+## Find your current location
+
+Choose **My location** below the map zoom buttons to center the map on your device at street level. Allow the browser’s location request; a dot marks the reported position and a circle shows its accuracy. This is a one-time lookup on each click and does not change your route endpoints. Device location requires HTTPS or localhost.
+
+## Choose your team
+
+Use **Your team** above the start address to select BLUE (the default), RED, GREEN, PURPLE, YELLOW, ORANGE, or PINK. Your team’s territory is excluded from enemy targets throughout exploration, refinement, and scoring. Other teams are scored using the current owner’s score. Changing teams clears the previous plan; run a new search. Route colors, labels, GeoJSON, and GPX exports reflect the selected team.
+
 ## How route selection works
 
 The planner requests OSRM driving routes with full geometry and maneuver steps, then tries near, medium, and far excursions on both sides of the trip, plus known enemy cell centers. Feasible initial routes seed the refinement search:
@@ -87,15 +95,15 @@ The planner requests OSRM driving routes with full geometry and maneuver steps, 
 - **Beam:** retains up to six routes at each depth, balancing capture value (65%) with territory difference (35%) to explore different branches, trying up to four insertions per route over three rounds. It can continue a temporarily weaker branch to discover a better later combination. At most 72 refinement requests. Earlier good routes remain eligible for the final result.
 - **Compare:** runs both refinements from identical initial routes and the same board/time budget. A request-scoped cache reuses identical routing requests, including failures, between methods. The table reports logical refinement checks; total provider requests reflect cache misses. Beam has a larger search allowance, so this is a comparison of the available modes, not an equal-compute experiment.
 
-Insertions target missed cells within two grid cells of the actual road route, preserving previous waypoints in trip order. Routes exceeding the fastest baseline plus the detour budget are excluded at every depth. Remaining routes are ranked by weighted capture value, then raw target count, driving time, and distance. Beam always keeps the best-scoring route first. Final beam alternatives must differ from every selected option by at least 20% using Jaccard distance over all crossed grid cells (including BLUE territory). This suppresses tiny street variations and may return fewer than six options when the feasible routes are similar. Alternatives balance capture value with territory difference before being displayed in score order; a different drive may have lower capture value. This compares territory footprints, not exact road overlap. Revisits count once. Traversal uses the observed 0.0027-degree latitude and 0.00384-degree longitude grid; boundary-only touches do not add counts. Zero-target routes are not recommended.
+Insertions target missed cells within two grid cells of the actual road route, preserving previous waypoints in trip order. Routes exceeding the fastest baseline plus the detour budget are excluded at every depth. Remaining routes are ranked by weighted capture value, then raw target count, driving time, and distance. Beam always keeps the best-scoring route first. Final beam alternatives must differ from every selected option by at least 20% using Jaccard distance over all crossed grid cells (including friendly territory). This suppresses tiny street variations and may return fewer than six options when the feasible routes are similar. Alternatives balance capture value with territory difference before being displayed in score order; a different drive may have lower capture value. This compares territory footprints, not exact road overlap. Revisits count once. Traversal uses the observed 0.0027-degree latitude and 0.00384-degree longitude grid; boundary-only touches do not add counts. Zero-target routes are not recommended.
 
-These are bounded heuristic searches, not proofs of the optimal route. Beam can still miss useful combinations or finish with fewer targets than greedy; Compare mode reports the difference rather than assuming beam wins. Unpainted cells are inferred from the observed grid and absence from the snapshot; this is an exploration assumption, not evidence of radio coverage or guaranteed eligibility. The UI separates enemy and unpainted counts and outlines selected targets in green (dashed for unpainted). Ownership is a targeting signal, not a capture probability. Holding-team scores influence the heuristic, but radio coverage, transmission timing, protection, future score decay, and BLUE’s existing score deficit are not modeled. Repeater coordinates are not treated as coverage predictions. Confirm that the downloaded board corresponds to MeshCore; the payload contains no explicit protocol field.
+These are bounded heuristic searches, not proofs of the optimal route. Beam can still miss useful combinations or finish with fewer targets than greedy; Compare mode reports the difference rather than assuming beam wins. Unpainted cells are inferred from the observed grid and absence from the snapshot; this is an exploration assumption, not evidence of radio coverage or guaranteed eligibility. The UI separates enemy and unpainted counts and outlines selected targets in green (dashed for unpainted). Ownership is a targeting signal, not a capture probability. Holding-team scores influence the heuristic, but radio coverage, transmission timing, protection, future score decay, and your team’s existing score deficit are not modeled. Repeater coordinates are not treated as coverage predictions. Confirm that the downloaded board corresponds to MeshCore; the payload contains no explicit protocol field.
 
 Directions are a planning sheet, without live navigation, traffic, rerouting, or guaranteed current road restrictions. Detour centers may snap to nearby roads and do not guarantee traversal of the target cell; the actual returned geometry determines the square count.
 
 ## Capture difficulty and square shading
 
-The holding score is `scores[owner_team]`, not the sum of teams’ scores or `paint_count`. BLUE-owned cells contribute no reward. Routing uses this explicit heuristic:
+The holding score is `scores[owner_team]`, not the sum of teams’ scores or `paint_count`. Squares owned by your selected team contribute no reward. Routing uses this explicit heuristic:
 
 | Cell | Weighted value |
 | --- | --- |
@@ -151,6 +159,7 @@ Browser assets load from unpkg.com; map tiles load from OpenStreetMap. The appli
 - `server.py`: local HTTP API and OSRM adapter.
 - `board_feed.py`: background board polling, validation, conditional requests, and durable fallback cache.
 - `capture_users.py`: optional authenticated capture-event polling and conservative player attribution.
+- `teams.py`: supported teams and shared input validation.
 - `navigation.py`: mobile-compatible Google Maps sections and complete GPX track serialization.
 - `planner.py`: geometry intersections, candidate selection, and route ranking.
 - `geocoder.py`: Photon integration, response normalization, and bounded in-memory lookup cache.
@@ -162,7 +171,7 @@ Run checks:
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m py_compile server.py planner.py geocoder.py board_feed.py capture_users.py navigation.py
+python3 -m py_compile server.py planner.py geocoder.py board_feed.py capture_users.py navigation.py teams.py
 ```
 
 Automated tests cover exploration away from a BLUE-only corridor, unique unpainted counts, budget enforcement, zero-target handling, progress events, streaming errors, disconnected-search termination, address result parsing, query encoding/caching, input validation, lookup failure handling, missed-cell insertion, long straight road sampling, preservation of the faster route when geometry is duplicated, beam search escaping a greedy local optimum, shared-request reuse, beam request limits, bounded concurrency, serial/parallel result equivalence, in-flight deduplication, partial batch failures, provider request spacing, owner-score thresholds, missing/invalid scores, low-score targets outranking larger groups of 50-point squares, live-feed updates, conditional responses, failure fallback, cache persistence, manual refresh throttling, pinned search revisions, exact player/event matching, attribution caching, cursor replay, rejected-key fallback, ordered waypoint preservation in every provider request, constrained baseline budgets, repeated stops, invalid/unreachable waypoint handling, navigation section continuity, waypoint/URL limits, GPX coordinate retention and XML escaping, and the route-export endpoint. HTTP handlers are exercised in memory because this development sandbox prevents opening local sockets. Live provider requests and browser rendering have not been verified here; DNS, socket restrictions, and missing Node tooling prevent live preview and Sites packaging/publication.

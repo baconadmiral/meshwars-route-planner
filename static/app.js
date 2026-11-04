@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 let board = [], result = null, routeIndex = 0, clickCount = 0;
 let boardRevision=null,boardAvailable=false,feedMetadata=null,feedLoading=false;
 const colors = {BLUE:'#1656e8',RED:'#e44444',GREEN:'#2e9e65',PURPLE:'#8858be',YELLOW:'#d2a716',ORANGE:'#e88032',PINK:'#db6aa5'};
+const selectedTeam=()=>$('team').value;
 let map, territories, routeLayer, markers, targets;
 let searching = false, searchController = null;
 const selectedLocations = {};
@@ -63,7 +64,7 @@ async function resolveLocation(id,signal){
    $(id).value=match.label;selectedLocations[id]=match;
    choices.textContent=`Selected: ${match.coordinates[1].toFixed(6)}, ${match.coordinates[0].toFixed(6)}`;
    updateMarkers();map.panTo([match.coordinates[1],match.coordinates[0]]);
-   $('status').textContent='Location selected. Confirm the other endpoint, then find BLUE opportunities.';
+   $('status').textContent=`Location selected. Confirm the other endpoint, then find ${selectedTeam()} opportunities.`;
   };
   choices.append(button);
  }
@@ -156,8 +157,6 @@ const utility=value=>Number(value||0).toLocaleString(undefined,{maximumFractionD
 let squareDarkness=80;
 let squareContrast=70;
 let captureDays=0;
-let capturedUser='all';
-try{capturedUser=localStorage.getItem('blue-captured-user')||'all';}catch{}
 try{
  const saved=localStorage.getItem('blue-square-darkness');
  if(saved!==null && saved.trim()!=='' && Number.isFinite(Number(saved)) && Number(saved)>=0 && Number(saved)<=100)squareDarkness=Number(saved);
@@ -180,7 +179,7 @@ function updateSquareDarkness(immediate=false){
  // Update the legend with the same score shading as the actual squares.
  document.querySelectorAll('.score-swatches i').forEach((swatch,index)=>{
   const points=[.1,1,3][index];
-  const style=squareStyle({owner_team:'BLUE',scores:{BLUE:points}});
+  const style=squareStyle({owner_team:selectedTeam(),scores:{[selectedTeam()]:points}});
   swatch.style.backgroundColor=style.fillColor.replace('rgb(','rgba(').replace(')',`,${style.fillOpacity})`);
   swatch.style.borderColor=style.fillOpacity===0?style.color:'transparent';
  });
@@ -219,11 +218,6 @@ $('capture-days').addEventListener('change',()=>{
  captureDays=Number($('capture-days').value);updateSquareDarkness(true);
  try{localStorage.setItem('blue-capture-days',String(captureDays));}catch{}
 });
-$('captured-by').addEventListener('change',event=>{
- capturedUser=event.target.value;
- try{localStorage.setItem('blue-captured-user',capturedUser);}catch{}
- updateSquareDarkness(true);
-});
 updateSquareDarkness();
 window.addEventListener('squarethemechange',()=>updateSquareDarkness(true));
 function squareStyle(cell){
@@ -243,9 +237,6 @@ function squareStyle(cell){
          fillColor:`rgb(${rgb.join(',')})`,fillOpacity:intensity*scoreOpacity};
 }
 function captureVisible(cell,now=Date.now()/1000){
- const name=typeof cell?.captured_by==='string'?cell.captured_by.trim():'';
- if(capturedUser==='unknown' && name)return false;
- if(capturedUser.startsWith('user:') && `user:${name.toLowerCase()}`!==capturedUser)return false;
  if(captureDays===0)return true;
  const captured=cell?.captured_at;
  return typeof captured==='number' && Number.isFinite(captured) && captured>0 &&
@@ -271,7 +262,7 @@ function drawBoard(){
   rect.on('mouseover',()=>rect.setStyle({stroke:true,color:colors[c.owner_team]||'#888888',weight:1,opacity:.75}));
   rect.on('mouseout',()=>rect.setStyle(squareStyle(c)));
   const captured=typeof c.captured_at==='number' && Number.isFinite(c.captured_at) && c.captured_at>0 ? ` · Captured ${new Date(c.captured_at*1000).toLocaleString()}` : '';
-  rect.bindTooltip(`${escape(c.owner_team)} · ${escape(c.cell_id)} · ${scoreLabel(c)}${captured} · Captured by ${escape(c.captured_by||'Unknown')}`);
+  rect.bindTooltip(`${escape(c.owner_team)} · ${escape(c.cell_id)} · ${scoreLabel(c)}${captured}`);
  }
  // Rebuilt fills must stay beneath target outlines and the selected route.
  if(targets)targets.eachLayer(layer=>layer.bringToFront?.());
@@ -339,9 +330,9 @@ function showRoute(index){
  targets.clearLayers();
  drawRouteTargets(r);
  L.geoJSON(base.geometry,{style:{color:'#8494aa',weight:5,opacity:.55}}).addTo(routeLayer);
- const line=L.geoJSON(r.geometry,{style:{color:'#1656e8',weight:5,opacity:.95}}).addTo(routeLayer);
+ const line=L.geoJSON(r.geometry,{style:{color:colors[result.team],weight:5,opacity:.95}}).addTo(routeLayer);
  map.fitBounds(line.getBounds(),{padding:[25,25]});
- const cards=result.routes.map((v,i)=>`<button class="card ${i===index?'selected':''}" data-route="${i}" aria-pressed="${i===index}">${i===0?'Best BLUE opportunity':`Alternative ${i+1}`}<b>${utility(v.capture_value)} priority value</b><small>${v.target_count} raw targets · ${v.easy_enemy_count} easy enemy<br>${v.hard_enemy_count} defended · ${v.unknown_score_count} unknown score · ${v.unmapped_count} unpainted<br>${minutes(v.duration)} · ${miles(v.distance)}<br>+${minutes(Math.max(0,v.duration-base.duration))} vs fastest</small></button>`).join('');
+ const cards=result.routes.map((v,i)=>`<button class="card ${i===index?'selected':''}" data-route="${i}" aria-pressed="${i===index}">${i===0?`Best ${result.team} opportunity`:`Alternative ${i+1}`}<b>${utility(v.capture_value)} priority value</b><small>${v.target_count} raw targets · ${v.easy_enemy_count} easy enemy<br>${v.hard_enemy_count} defended · ${v.unknown_score_count} unknown score · ${v.unmapped_count} unpainted<br>${minutes(v.duration)} · ${miles(v.distance)}<br>+${minutes(Math.max(0,v.duration-base.duration))} vs fastest</small></button>`).join('');
  const steps=[];
  r.legs.forEach((leg,legIndex)=>leg.steps.forEach(step=>{
   let text=instruction(step);
@@ -352,8 +343,8 @@ function showRoute(index){
  document.querySelectorAll('[data-route]').forEach(el=>el.onclick=()=>showRoute(Number(el.dataset.route)));
  $('phone-navigation').onclick=()=>openNavigation(r);
  $('download').onclick=()=>{
-  const blob=new Blob([JSON.stringify({type:'Feature',geometry:r.geometry,properties:{team:'BLUE',duration_seconds:r.duration,target_count:r.target_count,capture_value:r.capture_value,easy_enemy_count:r.easy_enemy_count,hard_enemy_count:r.hard_enemy_count,required_waypoints:result.required_waypoints}},null,2)],{type:'application/geo+json'});
-  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='blue-route.geojson';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const blob=new Blob([JSON.stringify({type:'Feature',geometry:r.geometry,properties:{team:result.team,duration_seconds:r.duration,target_count:r.target_count,capture_value:r.capture_value,easy_enemy_count:r.easy_enemy_count,hard_enemy_count:r.hard_enemy_count,required_waypoints:result.required_waypoints}},null,2)],{type:'application/geo+json'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`${result.team.toLowerCase()}-route.geojson`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
  };
 }
 function saveFile(blob,name){
@@ -373,7 +364,7 @@ function drawQr(container,url){
  }catch{container.textContent='Could not generate QR. Copy the link instead.';}
 }
 async function openNavigation(route){
- const button=$('phone-navigation');
+ const button=$('phone-navigation'),team=result.team;
  if($('navigation-modal'))return;
  const modal=document.createElement('dialog');
  modal.id='navigation-modal';modal.setAttribute('aria-labelledby','navigation-modal-title');
@@ -394,27 +385,27 @@ async function openNavigation(route){
  button.disabled=true;button.setAttribute('aria-expanded','true');
  panel.textContent='Preparing navigation links and GPX track…';
  try{
-  const response=await fetch('/api/route-export',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({route:{geometry:route.geometry,via_points:route.via_points||[],stop_labels:route.stop_labels||[]}})});
+  const response=await fetch('/api/route-export',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({route:{team:team,geometry:route.geometry,via_points:route.via_points||[],stop_labels:route.stop_labels||[]}})});
   const data=await response.json();if(!response.ok)throw Error(data.error||'Export failed.');
   // A route switch may have removed this panel while export was being prepared.
   if(!panel.isConnected)return;
   panel.innerHTML=`<p>Scan a QR code with your phone camera to open Google Maps. No email or access to this local app is needed. For longer routes, copy/share all section links to your phone before leaving, then finish each section and open the next one.</p><div id="navigation-sections"></div><p class="handoff-note">Google Maps recalculates roads between the stops and may skip capture streets. Check its preview before starting. GPX preserves the complete planned track for a compatible track-following app; it does not contain spoken instructions.</p><div class="route-actions"><button id="navigation-copy-all">Copy all navigation links</button><button id="navigation-share-all" hidden>Share all links</button></div><div class="route-actions handoff-file-actions"><button id="gpx-download">Download GPX track</button><button id="gpx-share" hidden>Share GPX file</button></div><p class="fine">Transfer the GPX file using AirDrop, Quick Share, your files/cloud app, or email. Import it in a navigation app that supports following GPX tracks. ${data.trackpoint_count.toLocaleString()} track points retained.</p><p id="handoff-status" role="status" aria-live="polite"></p>`;
   const allLinks=data.sections.map((section,index)=>`Section ${index+1}/${data.sections.length}: ${section.from_label} → ${section.to_label}\n${section.url}`).join('\n\n');
-  const allLinksText=`MeshWars BLUE drive — Google may recalculate roads. Open sections in order.\n\n${allLinks}`;
+  const allLinksText=`MeshWars ${team} drive — Google may recalculate roads. Open sections in order.\n\n${allLinks}`;
   panel.querySelector('#navigation-copy-all').onclick=async()=>{
    try{await navigator.clipboard.writeText(allLinksText);panel.querySelector('#handoff-status').textContent='All navigation links copied. Paste them into your preferred phone transfer app.';}
    catch{const text=document.createElement('textarea');text.value=allLinksText;text.setAttribute('aria-label','All navigation links');panel.append(text);text.focus();text.select();panel.querySelector('#handoff-status').textContent='Links selected. Copy them with your keyboard or browser menu.';}
   };
   if(navigator.share){const button=panel.querySelector('#navigation-share-all');button.hidden=false;button.onclick=async()=>{
-   try{await navigator.share({title:'MeshWars BLUE navigation sections',text:allLinksText});}
+   try{await navigator.share({title:`MeshWars ${team} navigation sections`,text:allLinksText});}
    catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='Sharing unavailable. Use Copy all navigation links.';}
   };}
-  const file=new File([data.gpx],'blue-route.gpx',{type:'application/gpx+xml'});
-  panel.querySelector('#gpx-download').onclick=()=>saveFile(file,'blue-route.gpx');
+  const file=new File([data.gpx],`${team.toLowerCase()}-route.gpx`,{type:'application/gpx+xml'});
+  panel.querySelector('#gpx-download').onclick=()=>saveFile(file,`${team.toLowerCase()}-route.gpx`);
   const shareFile=panel.querySelector('#gpx-share');
   if(navigator.share && navigator.canShare?.({files:[file]})){
    shareFile.hidden=false;
-   shareFile.onclick=async()=>{try{await navigator.share({files:[file],title:'MeshWars BLUE route'});}catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='File sharing unavailable. Download GPX and transfer it manually.';}};
+   shareFile.onclick=async()=>{try{await navigator.share({files:[file],title:`MeshWars ${team} route`});}catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='File sharing unavailable. Download GPX and transfer it manually.';}};
   }
   for(const [index,section] of data.sections.entries()){
    const card=document.createElement('section');card.className='navigation-section';
@@ -427,7 +418,7 @@ async function openNavigation(route){
     catch{input.focus();input.select();panel.querySelector('#handoff-status').textContent='Link selected. Copy it with your keyboard or browser menu.';}
    };
    const share=card.querySelector('.navigation-share');
-   if(navigator.share){share.hidden=false;share.onclick=async()=>{try{await navigator.share({title:`BLUE route — section ${index+1}`,url:section.url});}catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='Sharing unavailable. Use Copy link or scan the QR code.';}};}
+   if(navigator.share){share.hidden=false;share.onclick=async()=>{try{await navigator.share({title:`${team} route — section ${index+1}`,url:section.url});}catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='Sharing unavailable. Use Copy link or scan the QR code.';}};}
    panel.querySelector('#navigation-sections').append(card);
   }
  }catch(error){if(panel.isConnected && error.name!=='AbortError')panel.textContent=error.message;}
@@ -492,26 +483,6 @@ function initPanelResize(){
  window.addEventListener('afterprint',resize);
  resize();
 }
-function updateCapturedUsers(){
- const options=new Map();
- for(const cell of board){
-  if(typeof cell.captured_by!=='string'||!cell.captured_by.trim())continue;
-  const name=cell.captured_by.trim(),key=`user:${name.toLowerCase()}`;
-  const entry=options.get(key)||{name,count:0};entry.count++;options.set(key,entry);
- }
- const select=$('captured-by');select.replaceChildren();
- const add=(value,label)=>{const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);};
- add('all','All players');add('unknown','Unknown / unattributed');
- for(const [key,entry] of [...options].sort((a,b)=>a[1].name.localeCompare(b[1].name)))add(key,`${entry.name} (${entry.count})`);
- if(capturedUser.startsWith('user:')&&!options.has(capturedUser))add(capturedUser,`${capturedUser.slice(5)} (no attributed squares)`);
- select.value=capturedUser;
- if(!select.value){capturedUser='all';select.value='all';}
- const attribution=feedMetadata?.attribution;
- select.disabled=options.size===0 && capturedUser==='all';
- $('captured-by-help').textContent=!attribution?.configured && options.size===0
-  ?'No player names in the board feed. Configure MESHWARS_API_KEY on the server to enable capture attribution.'
-  :`${options.size} players identified in current squares. Recent observed events only; unmatched squares stay Unknown. Filters combine with capture age. ${attribution?.error||''}`;
-}
 function renderFeedStatus(){
  if(!feedMetadata)return;
  const meta=feedMetadata;
@@ -519,7 +490,6 @@ function renderFeedStatus(){
  const state=meta.refreshing?'Refreshing MeshWars…':meta.stale?'Using fallback data':'Live feed';
  $('board-feed-status').textContent=`${state} · ${meta.coverage_count.toLocaleString()} squares. Last successful check: ${stamp(meta.last_success)}. Last attempt: ${stamp(meta.last_checked)}. Automatic check interval: ${meta.error?meta.retry_interval:meta.refresh_interval}s. ${meta.error||meta.cache_error||''}`;
  document.querySelector('.board-feed').dataset.stale=String(meta.stale);
- updateCapturedUsers();
  $('board-route-warning').hidden=!(result && result.board_revision && result.board_revision!==boardRevision);
 }
 async function refreshBoard(full=false){
@@ -537,7 +507,7 @@ async function refreshBoard(full=false){
   feedMetadata=data;
   if(data.available && Array.isArray(data.coverage)){
    board=data.coverage;boardRevision=data.revision;boardAvailable=true;
-   updateCapturedUsers();drawBoard();
+   drawBoard();
   }
   renderFeedStatus();
   if(!searching)$('submit').disabled=!boardAvailable;
@@ -556,9 +526,62 @@ $('refresh-board').onclick=async()=>{
  }catch(error){$('board-feed-status').textContent=error.message;}
  finally{setTimeout(()=>{$('refresh-board').disabled=false;},15000);}
 };
+function initCurrentLocation(){
+ const control=L.control({position:'topleft'});
+ let locationLayer=null;
+ control.onAdd=()=>{
+  const container=L.DomUtil.create('div','current-location-control');
+  container.innerHTML='<button type="button" class="current-location-button" title="Zoom to your current location"><span aria-hidden="true">⌖</span> My location</button><p class="current-location-status" role="status" aria-live="polite" hidden></p>';
+  L.DomEvent.disableClickPropagation(container);
+  L.DomEvent.disableScrollPropagation(container);
+  const button=container.querySelector('button'),status=container.querySelector('p');
+  const message=text=>{status.hidden=false;status.textContent=text;};
+  button.onclick=()=>{
+   if(!window.isSecureContext){message('Location needs HTTPS or localhost.');return;}
+   if(!navigator.geolocation){message('This browser does not support device location.');return;}
+   button.disabled=true;button.setAttribute('aria-busy','true');
+   message('Finding your location…');
+   const finish=()=>{button.disabled=false;button.removeAttribute('aria-busy');};
+   navigator.geolocation.getCurrentPosition(position=>{
+    finish();
+    const {latitude,longitude,accuracy}=position.coords,point=[latitude,longitude];
+    if(locationLayer)map.removeLayer(locationLayer);
+    locationLayer=L.layerGroup([
+     L.circle(point,{radius:accuracy,color:'#2463df',weight:1,fillOpacity:.08,interactive:false}),
+     L.circleMarker(point,{radius:7,color:'#fff',weight:3,fillColor:'#2463df',fillOpacity:1,interactive:false})
+    ]).addTo(map);
+    map.setView(point,16);
+    message(`Your location · accuracy about ${Math.round(accuracy).toLocaleString()} m`);
+   },error=>{
+    finish();
+    message(error.code===1?'Location access denied. Allow location in your browser settings and try again.':
+            error.code===3?'Location lookup timed out. Try again.':'Your location is unavailable. Check device location settings and try again.');
+   },{enableHighAccuracy:true,timeout:15000,maximumAge:30000});
+  };
+  return container;
+ };
+ control.addTo(map);
+}
+function updateTeam(){
+ const team=selectedTeam();
+ document.querySelectorAll('[data-team-name]').forEach(label=>label.textContent=team);
+ document.title=`${team} / MeshWars Route Planner`;
+ document.documentElement.style.setProperty('--team-color',colors[team]);
+ $('submit').textContent=`Find ${team} opportunities →`;
+ result=null;tripLabels=null;
+ $('search-progress').hidden=true;
+ $('navigation-modal')?.close();
+ routeLayer?.clearLayers();targets?.clearLayers();
+ $('comparison').hidden=true;
+ $('results').innerHTML=`<div class="empty"><h2>A better route for ${team}.</h2><p>Select your start and destination to compare the fastest drive with territory opportunities.</p></div>`;
+ setPlanVisibility(false);updateSquareDarkness(true);renderFeedStatus();
+ if(boardAvailable)$('status').textContent=`Team ${team} selected. Run a new search to plan for this team.`;
+}
+$('team').onchange=updateTeam;
 async function init(){
  if(!window.L){$('status').textContent='Map library could not load. Check access to unpkg.com and reload.';$('submit').disabled=true;return;}
  map=L.map('map',{preferCanvas:true}).setView([40.6,-111.9],10);
+ initCurrentLocation();
  const progressControl=L.control({position:'topright'});
  progressControl.onAdd=()=>{
   const panel=$('search-progress');
@@ -573,13 +596,14 @@ async function init(){
  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
  initPanelResize();
  territories=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);markers=L.layerGroup().addTo(map);targets=L.layerGroup().addTo(map);
+ updateTeam();
  map.on('moveend',drawBoard);
  map.on('click',e=>{
   if(searching)return;
   if(mapPickTarget){
    const id=mapPickTarget;mapPickTarget=null;
    clearAddress(id);$(id).value=`${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
-   updateMarkers();$('status').textContent='Waypoint set. Add more stops or find BLUE opportunities.';return;
+   updateMarkers();$('status').textContent=`Waypoint set. Add more stops or find ${selectedTeam()} opportunities.`;return;
   }
   const id=clickCount%2===0?'start':'end';
   if(clickCount%2===0){$('end').value='';clearAddress('end');}
@@ -601,8 +625,8 @@ function setSearching(active){
   progress.dataset.meshState=complete?'complete':'idle';
   progress.querySelector('.mesh-caption').textContent=complete?'Route search complete':'Mesh standing by';
  }
- for(const id of ['start','end','start-lookup','end-lookup','budget','strategy','submit','print'])$(id).disabled=active;
- $('submit').textContent=active ? 'Searching routes…' : 'Find BLUE opportunities →';
+ for(const id of ['team','start','end','start-lookup','end-lookup','budget','strategy','submit','print'])$(id).disabled=active;
+ $('submit').textContent=active ? 'Searching routes…' : `Find ${selectedTeam()} opportunities →`;
  $('submit').disabled=active||!boardAvailable;
  $('results').setAttribute('aria-busy',String(active));
  document.querySelectorAll('.address-options button, #comparison button, #waypoints input, #waypoints button').forEach(button=>button.disabled=active);
@@ -650,12 +674,12 @@ $('planner').addEventListener('submit',async e=>{
   for(const id of waypointIds())requiredWaypoints.push(await resolveLocation(id,searchController.signal));
   const end=await resolveLocation('end',searchController.signal);
   if(!start || !end || requiredWaypoints.some(point=>!point)){
-   $('status').textContent='Choose the matching addresses below the inputs, then find BLUE opportunities again.';
+   $('status').textContent=`Choose the matching addresses below the inputs, then find ${selectedTeam()} opportunities again.`;
    $('progress-stage').textContent='Waiting for address selection';return;
   }
   updateMarkers();
   const requestedLabels={start:$('start').value,end:$('end').value,waypoints:waypointIds().map(id=>$(id).value)};
-  const data=await streamedPlan({start,end,waypoints:requiredWaypoints,detour_minutes:Number($('budget').value),strategy:$('strategy').value},event=>{
+  const data=await streamedPlan({team:selectedTeam(),start,end,waypoints:requiredWaypoints,detour_minutes:Number($('budget').value),strategy:$('strategy').value},event=>{
    lastUpdate=Date.now();$('progress-bar').value=event.percent;
    $('progress-percent').textContent=`${Math.floor(event.percent)}%`;
    $('progress-stage').textContent=event.message;updateTime();

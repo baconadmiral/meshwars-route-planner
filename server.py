@@ -15,6 +15,7 @@ from geocoder import lookup_address
 from board_feed import BoardFeed
 from capture_users import CaptureUsers
 from navigation import build_export
+from teams import validate_team
 
 ROOT = Path(__file__).resolve().parent
 ROUTER = os.environ.get('OSRM_URL', 'https://router.project-osrm.org').rstrip('/')
@@ -131,6 +132,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json({'results': lookup_address(query.strip())})
                 except (URLError, TimeoutError, OSError, ValueError):
                     return self.send_json({'error': 'Address lookup unavailable. Retry or enter latitude, longitude instead.'}, 502)
+            team = validate_team(data.get('team', 'BLUE'))
             start, end = point(data['start']), point(data['end'])
             raw_waypoints = data.get('waypoints', [])
             if not isinstance(raw_waypoints, list) or len(raw_waypoints) > 8:
@@ -156,10 +158,10 @@ class Handler(BaseHTTPRequestHandler):
                 streaming = True
                 self.close_connection = True
                 result = search_routes(start, end, coverage, budget, fetch_routes,
-                                       lambda update: self.send_event('progress', update), strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints)
+                                       lambda update: self.send_event('progress', update), strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints, team=team)
                 result['board_revision'] = board_snapshot.get('revision')
                 return self.send_event('result', result)
-            result = search_routes(start, end, coverage, budget, fetch_routes, strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints)
+            result = search_routes(start, end, coverage, budget, fetch_routes, strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints, team=team)
             result['board_revision'] = board_snapshot.get('revision')
             return self.send_json(result)
         except SearchCancelled:
@@ -195,7 +197,7 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     server.board_feed = feed
     feed.start()
-    print(f'BLUE route planner: http://127.0.0.1:{args.port}', flush=True)
+    print(f'MeshWars route planner: http://127.0.0.1:{args.port}', flush=True)
     try:
         server.serve_forever()
     finally:
