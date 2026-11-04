@@ -12,6 +12,9 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from planner import search_routes
 from geocoder import lookup_address
+from board_feed import BoardFeed
+from capture_users import CaptureUsers
+from navigation import build_export
 
 ROOT = Path(__file__).resolve().parent
 ROUTER = os.environ.get('OSRM_URL', 'https://router.project-osrm.org').rstrip('/')
@@ -55,6 +58,8 @@ def fetch_routes(points, alternatives=False):
 def point(value):
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError('Locations must be [longitude, latitude].')
+    if any(isinstance(v,bool) for v in value):
+        raise ValueError('Coordinates must be numbers.')
     x, y = map(float, value)
     if not all(map(math.isfinite, (x, y))) or not -180 <= x <= 180 or not -90 <= y <= 90:
         raise ValueError('Invalid longitude or latitude.')
@@ -78,10 +83,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def board_snapshot(self, include_coverage=True):
+        if hasattr(self.server, 'board_feed'):
+            return self.server.board_feed.snapshot(include_coverage)
+        # Compatibility for embedded/test servers providing a fixed board.
+        data = {'source': str(self.server.board_path.name), 'available': True}
+        if include_coverage:
+            data['coverage'] = self.server.board['coverage']
+        return data
+
     def do_GET(self):
         path = urlparse(self.path).path
-        if path == '/api/board':
-            return self.send_json({'coverage': self.server.board['coverage'], 'source': str(self.server.board_path.name)})
+        if path in ('/api/board', '/api/board/status'):
+            return self.send_json(self.board_snapshot(include_coverage=path == '/api/board'))
         assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if path not in assets:
             return self.send_error(404)
@@ -95,14 +109,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path not in ('/api/plan', '/api/plan-stream', '/api/geocode'):
+        if self.path not in ('/api/plan', '/api/plan-stream', '/api/geocode', '/api/board/refresh', '/api/route-export'):
             return self.send_error(404)
         streaming = False
         try:
             length = int(self.headers.get('Content-Length', 0))
-            if not 0 < length <= 4096:
+            limit = 5*1024*1024 if self.path == '/api/route-export' else 4096
+            if not 0 < length <= limit:
                 raise ValueError('Invalid request size.')
             data = json.loads(self.rfile.read(length))
+            if self.path == '/api/route-export':
+                return self.send_json(build_export(data.get('route') if isinstance(data,dict) else None))
+            if self.path == '/api/board/refresh':
+                self.server.board_feed.request_refresh()
+                return self.send_json({'message': 'Refresh requested. Checks are spaced at least 15 seconds apart.'}, 202)
             if self.path == '/api/geocode':
                 query = data.get('query') if isinstance(data, dict) else None
                 if not isinstance(query, str) or not 3 <= len(query.strip()) <= 300:
@@ -112,12 +132,20 @@ class Handler(BaseHTTPRequestHandler):
                 except (URLError, TimeoutError, OSError, ValueError):
                     return self.send_json({'error': 'Address lookup unavailable. Retry or enter latitude, longitude instead.'}, 502)
             start, end = point(data['start']), point(data['end'])
+            raw_waypoints = data.get('waypoints', [])
+            if not isinstance(raw_waypoints, list) or len(raw_waypoints) > 8:
+                raise ValueError('Provide at most eight ordered waypoints.')
+            required_waypoints = [point(value) for value in raw_waypoints]
             budget = float(data.get('detour_minutes', 15))*60
             if not math.isfinite(budget) or not 0 <= budget <= 7200:
                 raise ValueError('Detour must be between 0 and 120 minutes.')
             strategy = data.get('strategy', 'beam')
             if strategy not in ('greedy', 'beam', 'compare'):
                 raise ValueError('Search strategy must be greedy, beam, or compare.')
+            board_snapshot = self.board_snapshot()
+            if board_snapshot.get('available') is False:
+                return self.send_json({'error': 'No board data available yet. Wait for the feed or provide --board.'}, 503)
+            coverage = board_snapshot['coverage']
             if self.path == '/api/plan-stream':
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/x-ndjson')
@@ -127,10 +155,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 streaming = True
                 self.close_connection = True
-                result = search_routes(start, end, self.server.board['coverage'], budget, fetch_routes,
-                                       lambda update: self.send_event('progress', update), strategy=strategy, workers=ROUTING_WORKERS)
+                result = search_routes(start, end, coverage, budget, fetch_routes,
+                                       lambda update: self.send_event('progress', update), strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints)
+                result['board_revision'] = board_snapshot.get('revision')
                 return self.send_event('result', result)
-            return self.send_json(search_routes(start, end, self.server.board['coverage'], budget, fetch_routes, strategy=strategy, workers=ROUTING_WORKERS))
+            result = search_routes(start, end, coverage, budget, fetch_routes, strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints)
+            result['board_revision'] = board_snapshot.get('revision')
+            return self.send_json(result)
         except SearchCancelled:
             return
         except (ValueError, KeyError, TypeError) as error:
@@ -153,16 +184,23 @@ def main():
     parser.add_argument('--port', type=int, default=8000)
     args = parser.parse_args()
     try:
-        board = json.loads(args.board.read_text())
-        required = {'cell_id', 'owner_team', 'south', 'west', 'north', 'east'}
-        if not isinstance(board.get('coverage'), list) or not all(required <= c.keys() for c in board['coverage']):
-            raise ValueError('Expected coverage records with IDs, owners, and bounds.')
-    except (OSError, ValueError, AttributeError) as error:
-        parser.error(f'Cannot load board: {error}')
+        users = CaptureUsers(ROOT/'.cache'/'capture_users.json',
+                             key=os.environ.get('MESHWARS_API_KEY'),
+                             api_url=os.environ.get('MESHWARS_API_URL', 'https://meshwars.com/api/v1'))
+        feed = BoardFeed(args.board, ROOT/'.cache'/'board.json', capture_users=users,
+                         url=os.environ.get('MESHWARS_BOARD_URL', 'https://meshwars.com/get-nodes'),
+                         interval=float(os.environ.get('MESHWARS_REFRESH_SECONDS', '1800')))
+    except ValueError as error:
+        parser.error(str(error))
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
-    server.board, server.board_path = board, args.board
+    server.board_feed = feed
+    feed.start()
     print(f'BLUE route planner: http://127.0.0.1:{args.port}', flush=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        feed.close()
+        server.server_close()
 
 if __name__ == '__main__':
     main()

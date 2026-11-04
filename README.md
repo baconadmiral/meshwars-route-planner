@@ -11,11 +11,9 @@ cd ~/OTHER_DEV/meshwars-route-planner
 python3 server.py
 ```
 
-Open **http://127.0.0.1:8000**. The default board snapshot is `../nodes.json`, matching your existing download. To refresh it, stop the server, download a new snapshot, and restart:
+Open **http://127.0.0.1:8000**. The server fetches MeshWars immediately and checks for updates every 5 minutes. The browser checks local feed status every 15 seconds and loads changed boards without reloading the page. The **Capture data** panel shows successful checks, errors/fallback status, and a **Refresh now** button.
 
-```sh
-curl --fail --silent --show-error https://meshwars.com/get-nodes -o ../nodes.json
-```
+The existing `../nodes.json` is an optional startup fallback. The latest successfully validated live board is saved atomically in `.cache/board.json` (Git-ignored), and reused on restart. Your original `nodes.json` is not overwritten. The app can start without either file and will enable planning once its first live fetch succeeds.
 
 To use another snapshot or port:
 
@@ -23,10 +21,34 @@ To use another snapshot or port:
 python3 server.py --board /path/to/nodes.json --port 8080
 ```
 
+## Automatic capture feed
+
+`board_feed.py` polls `https://meshwars.com/get-nodes` in one background thread, independently of route requests. It uses ETag/Last-Modified conditional requests when provided, validates square records before replacing data, and retains the last good board if the network, response validation, or cache write fails. The feed checks immediately on server startup and every 30 minutes by default, including retries after failures; the UI displays the retry interval. The browser loads capture data initially and checks for updates every 30 minutes. Switching tabs does not trigger an extra check. Manual checks are spaced at least 15 seconds apart and never overlap.
+
+Configure the feed when needed:
+
+```sh
+MESHWARS_REFRESH_SECONDS=1800 python3 server.py
+```
+
+`MESHWARS_REFRESH_SECONDS` defaults to 1800 (30 minutes) and must be at least 15. `MESHWARS_BOARD_URL` can override the feed endpoint for a compatible service. No session cookie is stored or sent. `/api/board/status` returns lightweight freshness metadata; `/api/board` includes the full coverage array; `POST /api/board/refresh` schedules a check.
+
+Each route search holds the board version present when it starts. Updated scores cannot change the objective midway through a beam search. Existing results are flagged when newer board data arrives; rerun the search to use it. Capture-age and display settings apply to refreshed data immediately. Feed freshness reflects a successful fetch/check, not a guarantee that upstream observations are recent.
+
+## Filter by capturing player
+
+**Captured by** combines with the capture-age filter and updates the map immediately. It lists players attributed to current squares, plus **All players** and **Unknown / unattributed**. Your choice persists. This filters display only; route optimization continues using the full board.
+
+The existing board payload has no player names. The optional integration reads the documented [`/api/v1/captures`](https://meshwars.com/api#captures) endpoint for MeshCore, using a server-side `MESHWARS_API_KEY`. Obtain a read-only integration key from the MeshWars operator, configure it in your local environment, and restart `python3 server.py`. Do not put the key in frontend code, version control, or this chat. `MESHWARS_API_URL` overrides the API base if needed.
+
+Attribution refreshes alongside the board. Events are joined only when both owner team and capture timestamp exactly match the current square. This identifies the last matching capturer, not everyone who ever visited or defended the square. Names and the cursor are cached in Git-ignored `.cache/capture_users.json`; the key is never cached or returned to the browser. Missing/failed attribution does not stop normal board updates.
+
+Coverage is partial: the initial request reads at most 500 recent events; later polls accumulate the latest observed event per square. Older or missed events remain Unknown. The app does not guess names from teams or claim complete historical player coverage. An expired/rejected key is reported beside the dropdown.
+
 ## Plan a drive
 
-1. Enter an **address or place name**, choose **Find address**, and select the correct match. Include city and state or ZIP code to narrow the results. You can also enter **latitude, longitude** or click the map to set A and B. Mix addresses and coordinates freely. A third map click starts a new pair. Submitting an unresolved address also performs lookup and asks you to choose a match before routing. Editing a selected address clears its saved location.
-2. Set the maximum additional driving time, from 0 to 120 minutes. Choose **Beam search** (default), **Greedy** (the previous method), or **Compare beam vs. greedy**.
+1. Set A and B. Enter an **address or place name**, choose **Find address**, and select the correct match. Include city and state or ZIP code to narrow the results. You can also enter **latitude, longitude** or click the map to set A and B. Mix addresses and coordinates freely. A third map click starts a new pair. Submitting an unresolved address also performs lookup and asks you to choose a match before routing. Editing a selected address clears its saved location.
+2. Optionally add ordered manual waypoints using **Add waypoint** or **Pick on map**. Then set the maximum additional driving time, from 0 to 120 minutes. Choose **Beam search** (default), **Greedy** (the previous method), or **Compare beam vs. greedy**.
 3. Choose **Find BLUE opportunities**. A live progress bar shows the search stage and completed detours, with elapsed time and time since the last server update. Slow provider requests display a waiting message. Percentages represent search work, not estimated time remaining. The search may take several minutes if routing requests time out. Use **Cancel search** to stop; a request already sent to the provider may take until its timeout to release the server task.
 4. Compare up to six beam route options (up to three for greedy), the fastest-route baseline, and numbered directions. In Compare mode, a table shows each method’s weighted value, raw target count, driving time, and refinement checks. Use **Show route** to switch the map and directions without rerunning the search.
 5. Print the selected directions or download its GeoJSON line geometry.
@@ -38,6 +60,24 @@ The route plan and divider stay hidden until a search returns routes, giving the
 Drag the **Map / route plan** divider up or down to change the panel sizes. The sidebar and route plan scroll independently on desktop, keeping the map visible. Your split is remembered in this browser. Focus the divider and use Up/Down arrows (Shift for larger steps), Home/End for minimum/maximum map size, or double-click to reset. Touch dragging is supported. Printed directions use a fixed map height and expand the full route plan.
 
 The map shows team-colored cells with score-based faint-to-bold fills, visually capped at 3 points; hover to see the full holding score and recorded capture time. Missing scores are labeled unknown. Cells are drawn when fewer than 2,501 known squares are in view; zoom in if territory is hidden. Gray indicates the fastest baseline, and blue indicates the selected route.
+
+## Navigate and transfer to a phone
+
+After selecting a route, choose **Navigate / send to phone**. Each navigation section has **Open Google Maps**, a camera-scannable QR code, **Copy link**, and (when supported by the browser) a native **Share link** button. Scan a QR from the desktop to open its Google Maps URL directly on your phone: the phone does not need access to the local Python server, and no route-hosting service or email is required. QR codes are generated in the browser with a CDN-loaded QR library; coordinates are not sent to a QR-image service.
+
+All manual and exploration stops are retained in order. Long routes are divided into sections with at most three intermediate stops per Google Maps link, respecting the documented mobile-browser waypoint limit. Sections overlap at their boundary stop. Use **Copy all navigation links** or **Share all links** to transfer the complete ordered list before leaving, then open sections in sequence. Google Maps can open a preview rather than immediately start navigation depending on the device/location; review it and start when ready. [Google Maps URL documentation](https://developers.google.com/maps/documentation/urls/get-started).
+
+Google recalculates roads between the stops and may skip planned capture streets. For the complete geometry, use **Download GPX track**. The GPX retains every route coordinate and stop, without simplifying the track. It contains no spoken maneuver instructions; import it into an app that supports following GPX tracks and review that app’s handling of the track. Google Maps does not import a GPX track through these direction links.
+
+**Share GPX file** appears when the browser supports sharing that file type. Otherwise download it and transfer it using AirDrop, Quick Share, your usual file/cloud app, or email. Native sharing targets depend on your device; no messages or emails are sent automatically. Browser/device handoff and QR scanning have not been verified in this sandbox. If the QR library cannot load, copy/share links remain available.
+
+## Guide exploration with manual waypoints
+
+Add up to eight mandatory stops between A and B. Each accepts an address or coordinates, or use **Pick on map** to create a stop with the next map click. Existing rows have a **Map** button to reposition them. Use the arrows to reorder stops and **Remove** to delete one. Press Escape to cancel a pending map pick. Markers and printed directions identify them as W1, W2, etc.
+
+For example, place W1 west of your start and W2 farther along the western area before your destination. Every baseline, initial detour, and beam/greedy candidate must include those stops in order. The optimizer can insert exploration stops between them but cannot discard or reorder your manual stops. Broad exploration candidates are generated around each required leg, sharing a maximum of 16 initial requests instead of multiplying requests for every leg.
+
+The time budget is relative to the fastest route **through all manual waypoints**. If that drive takes 30 minutes and you permit 15 extra minutes, results must fit within 45 minutes. An unreachable required route returns an error rather than silently dropping a stop. The map is intended to guide regional exploration; waypoints do not establish radio coverage or forbid every road outside a region. Routing providers may snap the chosen coordinates to nearby roads. Edit stops and run a new search to update an existing plan.
 
 ## How route selection works
 
@@ -72,7 +112,7 @@ The palette uses muted team hues without pale white-heavy fills in dark mode. Fi
 
 Score strength is not an exact capture-age measure: the tooltip includes `captured_at` from the snapshot where available.
 
-This utility is a planning preference, not a capture probability or an estimate of awarded game points. [MeshWars describes a ping as earning up to one point](https://meshwars.com/about), so a low holding score is promising but does not establish that every single transmission will steal the square. Scores come from the loaded snapshot and are not extrapolated forward; refresh the snapshot to reflect current territory.
+This utility is a planning preference, not a capture probability or an estimate of awarded game points. [MeshWars describes a ping as earning up to one point](https://meshwars.com/about), so a low holding score is promising but does not establish that every single transmission will steal the square. Scores come from the loaded snapshot and are not extrapolated forward; use the automatic feed or Refresh now to reflect current territory.
 
 ## Parallel routing and performance
 
@@ -104,11 +144,14 @@ Address lookup uses [Photon](https://photon.komoot.io/), which accepts modest us
 PHOTON_URL=http://localhost:2322 python3 server.py
 ```
 
-Browser assets load from unpkg.com; map tiles load from OpenStreetMap. The application suppresses HTTP access logs and does not persist trips. The board snapshot stays outside the project folder and is not bundled into a hosted site.
+Browser assets load from unpkg.com; map tiles load from OpenStreetMap. The application suppresses HTTP access logs and does not persist trips. The optional seed snapshot stays outside the project folder; the live fallback cache stays in Git-ignored `.cache/`. Board data is not bundled into version control.
 
 ## Structure and verification
 
 - `server.py`: local HTTP API and OSRM adapter.
+- `board_feed.py`: background board polling, validation, conditional requests, and durable fallback cache.
+- `capture_users.py`: optional authenticated capture-event polling and conservative player attribution.
+- `navigation.py`: mobile-compatible Google Maps sections and complete GPX track serialization.
 - `planner.py`: geometry intersections, candidate selection, and route ranking.
 - `geocoder.py`: Photon integration, response normalization, and bounded in-memory lookup cache.
 - `static/`: map, route controls, directions, and print layout.
@@ -119,10 +162,10 @@ Run checks:
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m py_compile server.py planner.py geocoder.py
+python3 -m py_compile server.py planner.py geocoder.py board_feed.py capture_users.py navigation.py
 ```
 
-Thirty-eight automated tests pass, including exploration away from a BLUE-only corridor, unique unpainted counts, budget enforcement, zero-target handling, progress events, streaming errors, disconnected-search termination, address result parsing, query encoding/caching, input validation, lookup failure handling, missed-cell insertion, long straight road sampling, preservation of the faster route when geometry is duplicated, beam search escaping a greedy local optimum, shared-request reuse, beam request limits, bounded concurrency, serial/parallel result equivalence, in-flight deduplication, partial batch failures, provider request spacing, owner-score thresholds, missing/invalid scores, and low-score targets outranking larger groups of 50-point squares. HTTP handlers are exercised in memory because this development sandbox prevents opening local sockets. Live provider requests and browser rendering have not been verified here; DNS, socket restrictions, and missing Node tooling prevent live preview and Sites packaging/publication.
+Automated tests cover exploration away from a BLUE-only corridor, unique unpainted counts, budget enforcement, zero-target handling, progress events, streaming errors, disconnected-search termination, address result parsing, query encoding/caching, input validation, lookup failure handling, missed-cell insertion, long straight road sampling, preservation of the faster route when geometry is duplicated, beam search escaping a greedy local optimum, shared-request reuse, beam request limits, bounded concurrency, serial/parallel result equivalence, in-flight deduplication, partial batch failures, provider request spacing, owner-score thresholds, missing/invalid scores, low-score targets outranking larger groups of 50-point squares, live-feed updates, conditional responses, failure fallback, cache persistence, manual refresh throttling, pinned search revisions, exact player/event matching, attribution caching, cursor replay, rejected-key fallback, ordered waypoint preservation in every provider request, constrained baseline budgets, repeated stops, invalid/unreachable waypoint handling, navigation section continuity, waypoint/URL limits, GPX coordinate retention and XML escaping, and the route-export endpoint. HTTP handlers are exercised in memory because this development sandbox prevents opening local sockets. Live provider requests and browser rendering have not been verified here; DNS, socket restrictions, and missing Node tooling prevent live preview and Sites packaging/publication.
 
 ## References
 

@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from http.server import HTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from planner import choose, intersects, score, candidate_points, opportunity_score, exploration_points, search_routes, route_grid_cells, insertion_proposals, route_anchors, routing_batch, target_value, owner_score, route_rank, LAT_STEP, LON_STEP
+from planner import choose, intersects, score, candidate_points, opportunity_score, exploration_points, search_routes, route_grid_cells, insertion_proposals, route_anchors, routing_batch, target_value, owner_score, route_rank, validate_waypoints, initial_detours, LAT_STEP, LON_STEP
 from server import Handler, point, SearchCancelled
 
 CELL = dict(cell_id='test', owner_team='RED', west=0, east=1, south=0, north=1)
@@ -345,6 +345,70 @@ class CaptureDifficultyTests(unittest.TestCase):
         easy=self.cell(0,1,.5)
         selected=candidate_points([.0001,.001],[.01,.001],[hard,easy],limit=1)
         self.assertEqual(selected,[[(easy['west']+easy['east'])/2,(easy['south']+easy['north'])/2]])
+
+
+class RequiredWaypointTests(unittest.TestCase):
+    def test_all_requests_keep_required_waypoints_in_order_and_use_constrained_baseline(self):
+        start,end=[.001,.001],[.014,.001]
+        required=[[-.01,.003],[.005,.006]]
+        calls=[]
+        def router(points,alternatives=False):
+            calls.append((points,alternatives))
+            return [route(points,100+20*(len(points)-2))]
+        result=search_routes(start,end,[],60,router,waypoints=required,strategy='compare')
+        self.assertEqual(calls[0],([start,*required,end],False))
+        self.assertEqual(result['baseline']['duration'],140)
+        self.assertEqual(result['required_waypoints'],required)
+        for points,_ in calls:
+            self.assertEqual(points[0],start)
+            self.assertEqual(points[-1],end)
+            cursor=0
+            for point in points[1:-1]:
+                if cursor<len(required) and point==required[cursor]:cursor+=1
+            self.assertEqual(cursor,len(required))
+        for strategy in result['strategy_results'].values():
+            for r in strategy['routes']:
+                self.assertLessEqual(r['duration'],200)
+                self.assertEqual([label for label in r['stop_labels'] if label.startswith('W')],['W1','W2'])
+
+    def test_zero_budget_still_routes_through_all_waypoints(self):
+        start,end=[.001,.001],[.014,.001]
+        required=[[-.01,.003]]
+        calls=[]
+        def router(points,alternatives=False):calls.append(points);return [route(points)]
+        result=search_routes(start,end,[],0,router,waypoints=required)
+        self.assertEqual(calls,[[start,*required,end]])
+        self.assertEqual(result['baseline']['via_points'],required)
+
+    def test_unreachable_required_stop_never_falls_back_to_direct_route(self):
+        router=unittest.mock.Mock(side_effect=ValueError('No route'))
+        with self.assertRaises(ValueError):
+            search_routes([0,0],[.01,0],[],60,router,waypoints=[[.01,.01]])
+        self.assertEqual(router.call_count,1)
+
+    def test_invalid_and_excessive_waypoints_rejected_before_routing(self):
+        router=unittest.mock.Mock()
+        for waypoints in ('bad',[[0,0]]*9,[[181,0]],[[0,float('nan')]],[[True,0]],[[0]]):
+            with self.assertRaises(ValueError):
+                search_routes([0,0],[.01,.01],[],60,router,waypoints=waypoints)
+        router.assert_not_called()
+
+    def test_initial_candidates_are_shared_across_required_legs_and_bounded(self):
+        required=[[.01,0],[.02,0]]
+        def points(a,b,*args,**kwargs):return [[(a[0]+b[0])/2,.001+i*.001] for i in range(10)]
+        with patch('planner.exploration_points',side_effect=points) as generate:
+            detours=initial_detours([0,0],[.03,0],[],600,required)
+        self.assertEqual(len(detours),16)
+        self.assertEqual(generate.call_count,3)
+        self.assertEqual(detours[0][1:],required)
+        self.assertEqual(detours[1][0],required[0])
+        self.assertEqual(detours[1][-1],required[-1])
+        self.assertEqual(detours[2][:2],required)
+
+    def test_repeated_manual_stops_are_preserved(self):
+        point=[.01,.01]
+        result=search_routes([0,0],[.02,0],[],0,lambda points,*args:[route(points)],waypoints=[point,point])
+        self.assertEqual(result['baseline']['stop_labels'],['W1','W2'])
 
 
 class HttpTests(unittest.TestCase):

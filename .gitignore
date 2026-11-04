@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 nodes.json
 .env
+
+.cache/

@@ -1,11 +1,13 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let board = [], result = null, routeIndex = 0, clickCount = 0;
+let boardRevision=null,boardAvailable=false,feedMetadata=null,feedLoading=false;
 const colors = {BLUE:'#1656e8',RED:'#e44444',GREEN:'#2e9e65',PURPLE:'#8858be',YELLOW:'#d2a716',ORANGE:'#e88032',PINK:'#db6aa5'};
 let map, territories, routeLayer, markers, targets;
 let searching = false, searchController = null;
 const selectedLocations = {};
 let tripLabels = null;
+let waypointCounter=0,mapPickTarget=null;
 $('cancel-search').onclick = () => searchController?.abort();
 const systemTheme=window.matchMedia('(prefers-color-scheme: dark)');
 let explicitTheme=null;
@@ -47,7 +49,7 @@ async function resolveLocation(id,signal){
   if(/^\s*[+-]?[\d.]+\s*,\s*[+-]?[\d.]+\s*$/.test($(id).value))throw error;
  }
  const query=$(id).value.trim();
- if(query.length<3)throw Error('Enter an address or latitude, longitude for both locations.');
+ if(query.length<3)throw Error('Enter an address or latitude, longitude for each stop.');
  const choices=$(id+'-matches');choices.textContent='Looking up address…';
  const response=await fetch('/api/geocode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query}),signal});
  const data=await response.json();
@@ -67,10 +69,11 @@ async function resolveLocation(id,signal){
  }
  return null;
 }
-for(const id of ['start','end']){
- $(id).addEventListener('input',()=>{clearAddress(id);if(markers)updateMarkers();});
+function bindLocation(id){
+ $(id).addEventListener('input',()=>{if(mapPickTarget===id)mapPickTarget=null;clearAddress(id);if(markers)updateMarkers();});
  $(id+'-lookup').onclick=async()=>{
   if(searching)return;
+  if(mapPickTarget===id)mapPickTarget=null;
   searchController=new AbortController();setSearching(true);
   $('search-progress').hidden=false;$('progress-bar').value=0;$('progress-percent').textContent='';
   $('progress-stage').textContent='Looking up address…';$('progress-time').textContent='Address lookup may take up to 15 seconds.';
@@ -83,12 +86,64 @@ for(const id of ['start','end']){
   finally{searchController=null;setSearching(false);}
  };
 }
+['start','end'].forEach(bindLocation);
 function updateMarkers(){
  markers.clearLayers();
- for(const [id,label] of [['start','A'],['end','B']]){
+ for(const [id,label] of [['start','A'],...waypointIds().map((id,index)=>[id,`W${index+1}`]),['end','B']]){
   try{const p=locationPoint(id);L.marker([p[1],p[0]]).addTo(markers).bindTooltip(label,{permanent:true});}catch{}
  }
 }
+function waypointIds(){return [...document.querySelectorAll('#waypoints [data-waypoint]')].map(row=>row.dataset.waypoint);}
+function refreshWaypointLabels(){
+ const rows=[...document.querySelectorAll('#waypoints [data-waypoint]')];
+ rows.forEach((row,index)=>{
+  row.querySelector('label').textContent=`Waypoint W${index+1}`;
+  row.querySelector('.waypoint-up').disabled=searching||index===0;
+  row.querySelector('.waypoint-down').disabled=searching||index===rows.length-1;
+  row.querySelector('.waypoint-map').setAttribute('aria-label',`Pick waypoint W${index+1} on map`);
+  row.querySelector('.waypoint-remove').setAttribute('aria-label',`Remove waypoint W${index+1}`);
+ });
+ $('add-waypoint').disabled=searching||rows.length>=8;
+ $('add-map-waypoint').disabled=searching||rows.length>=8;
+ if(markers)updateMarkers();
+}
+function pickWaypoint(id){
+ if(searching)return;
+ mapPickTarget=id;
+ const index=waypointIds().indexOf(id);
+ $('status').textContent=`Click the map to set W${index+1}.`;
+}
+function addWaypoint(pickOnMap=false){
+ if(searching||waypointIds().length>=8)return;
+ const id=`waypoint-${++waypointCounter}`,row=document.createElement('div');
+ row.className='waypoint-row';row.dataset.waypoint=id;
+ row.innerHTML=`<label for="${id}"></label><input id="${id}" placeholder="Address or latitude, longitude" required autocomplete="off" aria-describedby="${id}-matches"><div class="waypoint-actions"><button id="${id}-lookup" class="lookup" type="button">Find address</button><button class="waypoint-map" type="button">Map</button><button class="waypoint-up" type="button" aria-label="Move waypoint up">↑</button><button class="waypoint-down" type="button" aria-label="Move waypoint down">↓</button><button class="waypoint-remove" type="button">Remove</button></div><div id="${id}-matches" class="address-options" aria-live="polite"></div>`;
+ $('waypoints').append(row);bindLocation(id);
+ row.querySelector('.waypoint-map').onclick=()=>pickWaypoint(id);
+ row.querySelector('.waypoint-remove').onclick=()=>{
+  if(searching)return;
+  if(mapPickTarget===id)mapPickTarget=null;
+  delete selectedLocations[id];row.remove();refreshWaypointLabels();
+  $('status').textContent='Waypoint removed. Run a new search to update the route.';
+ };
+ row.querySelector('.waypoint-up').onclick=()=>{
+  if(searching||!row.previousElementSibling)return;
+  row.parentNode.insertBefore(row,row.previousElementSibling);refreshWaypointLabels();
+  $('status').textContent='Waypoint order changed. Run a new search to update the route.';
+ };
+ row.querySelector('.waypoint-down').onclick=()=>{
+  if(searching||!row.nextElementSibling)return;
+  row.nextElementSibling.after(row);refreshWaypointLabels();
+  $('status').textContent='Waypoint order changed. Run a new search to update the route.';
+ };
+ refreshWaypointLabels();
+ if(pickOnMap)pickWaypoint(id);else $(id).focus();
+}
+$('add-waypoint').onclick=()=>addWaypoint();
+$('add-map-waypoint').onclick=()=>addWaypoint(true);
+document.addEventListener('keydown',event=>{
+ if(event.key==='Escape' && mapPickTarget){mapPickTarget=null;$('status').textContent='Map waypoint selection cancelled.';}
+});
 function holdingScore(cell){
  const value=cell?.scores?.[cell.owner_team];
  return typeof value==='number' && Number.isFinite(value) && value>=0 ? value : null;
@@ -101,6 +156,8 @@ const utility=value=>Number(value||0).toLocaleString(undefined,{maximumFractionD
 let squareDarkness=80;
 let squareContrast=70;
 let captureDays=0;
+let capturedUser='all';
+try{capturedUser=localStorage.getItem('blue-captured-user')||'all';}catch{}
 try{
  const saved=localStorage.getItem('blue-square-darkness');
  if(saved!==null && saved.trim()!=='' && Number.isFinite(Number(saved)) && Number(saved)>=0 && Number(saved)<=100)squareDarkness=Number(saved);
@@ -162,6 +219,11 @@ $('capture-days').addEventListener('change',()=>{
  captureDays=Number($('capture-days').value);updateSquareDarkness(true);
  try{localStorage.setItem('blue-capture-days',String(captureDays));}catch{}
 });
+$('captured-by').addEventListener('change',event=>{
+ capturedUser=event.target.value;
+ try{localStorage.setItem('blue-captured-user',capturedUser);}catch{}
+ updateSquareDarkness(true);
+});
 updateSquareDarkness();
 window.addEventListener('squarethemechange',()=>updateSquareDarkness(true));
 function squareStyle(cell){
@@ -181,18 +243,25 @@ function squareStyle(cell){
          fillColor:`rgb(${rgb.join(',')})`,fillOpacity:intensity*scoreOpacity};
 }
 function captureVisible(cell,now=Date.now()/1000){
+ const name=typeof cell?.captured_by==='string'?cell.captured_by.trim():'';
+ if(capturedUser==='unknown' && name)return false;
+ if(capturedUser.startsWith('user:') && `user:${name.toLowerCase()}`!==capturedUser)return false;
  if(captureDays===0)return true;
  const captured=cell?.captured_at;
  return typeof captured==='number' && Number.isFinite(captured) && captured>0 &&
         captured<=now && captured>=now-captureDays*86400;
 }
 function drawBoard(){
- if(!map || !board.length)return;
+ if(!map)return;
  territories.clearLayers();
+ if(!board.length){
+  if(targets)targets.clearLayers();
+  $('capture-filter-status').textContent='0 squares match.';return;
+ }
  const bounds=map.getBounds();
  const now=Date.now()/1000;
  const eligible=board.filter(c=>captureVisible(c,now));
- $('capture-filter-status').textContent=`${eligible.length.toLocaleString()} of ${board.length.toLocaleString()} squares match across all teams.${captureDays>0?' Missing or future capture times are hidden.':''}`;
+ $('capture-filter-status').textContent=`${eligible.length.toLocaleString()} of ${board.length.toLocaleString()} squares match the capture filters across all teams.${captureDays>0?' Missing or future capture times are hidden.':''}`;
  const visible=eligible.filter(c=>bounds.intersects([[c.south,c.west],[c.north,c.east]]));
  if(targets && result?.routes?.[routeIndex])drawRouteTargets(result.routes[routeIndex]);
  if(visible.length>2500){return;}
@@ -202,7 +271,7 @@ function drawBoard(){
   rect.on('mouseover',()=>rect.setStyle({stroke:true,color:colors[c.owner_team]||'#888888',weight:1,opacity:.75}));
   rect.on('mouseout',()=>rect.setStyle(squareStyle(c)));
   const captured=typeof c.captured_at==='number' && Number.isFinite(c.captured_at) && c.captured_at>0 ? ` · Captured ${new Date(c.captured_at*1000).toLocaleString()}` : '';
-  rect.bindTooltip(`${escape(c.owner_team)} · ${escape(c.cell_id)} · ${scoreLabel(c)}${captured}`);
+  rect.bindTooltip(`${escape(c.owner_team)} · ${escape(c.cell_id)} · ${scoreLabel(c)}${captured} · Captured by ${escape(c.captured_by||'Unknown')}`);
  }
  // Rebuilt fills must stay beneath target outlines and the selected route.
  if(targets)targets.eachLayer(layer=>layer.bringToFront?.());
@@ -276,15 +345,77 @@ function showRoute(index){
  const steps=[];
  r.legs.forEach((leg,legIndex)=>leg.steps.forEach(step=>{
   let text=instruction(step);
-  if(step.maneuver.type==='arrive')text=legIndex===r.legs.length-1?'Arrive at destination B':'Reach detour waypoint; continue to the next leg';
+  if(step.maneuver.type==='arrive')text=legIndex===r.legs.length-1?'Arrive at destination B':`Reach ${r.stop_labels?.[legIndex]||'exploration detour'}; continue to the next leg`;
   steps.push(`<li><span>${escape(text)}</span><small>${miles(step.distance)}</small></li>`);
  }));
- $('results').innerHTML=`<div class="cards">${cards}</div><div class="routehead"><h2>Your driving directions</h2><button id="download">Download route GeoJSON</button></div><p class="trip">A: ${escape(tripLabels?.start||$('start').value)} → B: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p><ol class="steps">${steps.join('')}</ol>`;
+ $('results').innerHTML=`<div class="cards">${cards}</div><div class="routehead"><h2>Your driving directions</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-handoff">Navigate / send to phone</button><button id="download">GeoJSON</button></div></div><div id="navigation-handoff" hidden></div><p class="trip">A: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → B: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p><ol class="steps">${steps.join('')}</ol>`;
  document.querySelectorAll('[data-route]').forEach(el=>el.onclick=()=>showRoute(Number(el.dataset.route)));
+ $('phone-navigation').onclick=()=>openNavigation(r);
  $('download').onclick=()=>{
-  const blob=new Blob([JSON.stringify({type:'Feature',geometry:r.geometry,properties:{team:'BLUE',duration_seconds:r.duration,target_count:r.target_count,capture_value:r.capture_value,easy_enemy_count:r.easy_enemy_count,hard_enemy_count:r.hard_enemy_count}},null,2)],{type:'application/geo+json'});
+  const blob=new Blob([JSON.stringify({type:'Feature',geometry:r.geometry,properties:{team:'BLUE',duration_seconds:r.duration,target_count:r.target_count,capture_value:r.capture_value,easy_enemy_count:r.easy_enemy_count,hard_enemy_count:r.hard_enemy_count,required_waypoints:result.required_waypoints}},null,2)],{type:'application/geo+json'});
   const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='blue-route.geojson';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
  };
+}
+function saveFile(blob,name){
+ const url=URL.createObjectURL(blob),link=document.createElement('a');
+ link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function drawQr(container,url){
+ if(typeof window.qrcode!=='function'){container.textContent='QR library unavailable. Copy the link instead.';return;}
+ try{
+  const code=window.qrcode(0,'M');code.addData(url);code.make();
+  const count=code.getModuleCount(),scale=6,quiet=4,canvas=document.createElement('canvas');
+  canvas.width=canvas.height=(count+quiet*2)*scale;
+  canvas.setAttribute('role','img');canvas.setAttribute('aria-label','Scan with your phone camera to open this Google Maps section');
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#000';
+  for(let row=0;row<count;row++)for(let col=0;col<count;col++)if(code.isDark(row,col))ctx.fillRect((col+quiet)*scale,(row+quiet)*scale,scale,scale);
+  container.replaceChildren(canvas);
+ }catch{container.textContent='Could not generate QR. Copy the link instead.';}
+}
+async function openNavigation(route){
+ const panel=$('navigation-handoff'),button=$('phone-navigation');
+ if(!panel.hidden){panel.hidden=true;button.setAttribute('aria-expanded','false');return;}
+ panel.hidden=false;button.disabled=true;button.setAttribute('aria-expanded','true');
+ panel.textContent='Preparing navigation links and GPX track…';
+ try{
+  const response=await fetch('/api/route-export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route:{geometry:route.geometry,via_points:route.via_points||[],stop_labels:route.stop_labels||[]}})});
+  const data=await response.json();if(!response.ok)throw Error(data.error||'Export failed.');
+  // A route switch may have removed this panel while export was being prepared.
+  if(!panel.isConnected)return;
+  panel.innerHTML=`<h3>Take this drive on your phone</h3><p>Scan a QR code with your phone camera to open Google Maps. No email or access to this local app is needed. For longer routes, copy/share all section links to your phone before leaving, then finish each section and open the next one.</p><p class="handoff-note">Google Maps recalculates roads between the stops and may skip capture streets. Check its preview before starting. GPX preserves the complete planned track for a compatible track-following app; it does not contain spoken instructions.</p><div class="route-actions"><button id="navigation-copy-all">Copy all navigation links</button><button id="navigation-share-all" hidden>Share all links</button></div><div class="route-actions handoff-file-actions"><button id="gpx-download">Download GPX track</button><button id="gpx-share" hidden>Share GPX file</button></div><p class="fine">Transfer the GPX file using AirDrop, Quick Share, your files/cloud app, or email. Import it in a navigation app that supports following GPX tracks. ${data.trackpoint_count.toLocaleString()} track points retained.</p><div id="navigation-sections"></div><p id="handoff-status" role="status" aria-live="polite"></p>`;
+  const allLinks=data.sections.map((section,index)=>`Section ${index+1}/${data.sections.length}: ${section.from_label} → ${section.to_label}\n${section.url}`).join('\n\n');
+  const allLinksText=`MeshWars BLUE drive — Google may recalculate roads. Open sections in order.\n\n${allLinks}`;
+  panel.querySelector('#navigation-copy-all').onclick=async()=>{
+   try{await navigator.clipboard.writeText(allLinksText);panel.querySelector('#handoff-status').textContent='All navigation links copied. Paste them into your preferred phone transfer app.';}
+   catch{const text=document.createElement('textarea');text.value=allLinksText;text.setAttribute('aria-label','All navigation links');panel.append(text);text.focus();text.select();panel.querySelector('#handoff-status').textContent='Links selected. Copy them with your keyboard or browser menu.';}
+  };
+  if(navigator.share){const button=panel.querySelector('#navigation-share-all');button.hidden=false;button.onclick=async()=>{
+   try{await navigator.share({title:'MeshWars BLUE navigation sections',text:allLinksText});}
+   catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='Sharing unavailable. Use Copy all navigation links.';}
+  };}
+  const file=new File([data.gpx],'blue-route.gpx',{type:'application/gpx+xml'});
+  panel.querySelector('#gpx-download').onclick=()=>saveFile(file,'blue-route.gpx');
+  const shareFile=panel.querySelector('#gpx-share');
+  if(navigator.share && navigator.canShare?.({files:[file]})){
+   shareFile.hidden=false;
+   shareFile.onclick=async()=>{try{await navigator.share({files:[file],title:'MeshWars BLUE route'});}catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='File sharing unavailable. Download GPX and transfer it manually.';}};
+  }
+  for(const [index,section] of data.sections.entries()){
+   const card=document.createElement('section');card.className='navigation-section';
+   card.innerHTML=`<h4>Section ${index+1} of ${data.sections.length}: ${escape(section.from_label)} → ${escape(section.to_label)}</h4><p class="fine">${section.labels.map(escape).join(' → ')}</p><div class="navigation-qr"></div><div class="route-actions"><a class="navigation-open" target="_blank" rel="noopener noreferrer">Open Google Maps</a><button class="navigation-copy">Copy link</button><button class="navigation-share" hidden>Share link</button></div><input class="navigation-url" readonly aria-label="Google Maps section ${index+1} link">`;
+   const input=card.querySelector('input');input.value=section.url;input.onclick=()=>input.select();
+   card.querySelector('a').href=section.url;
+   drawQr(card.querySelector('.navigation-qr'),section.url);
+   card.querySelector('.navigation-copy').onclick=async()=>{
+    try{await navigator.clipboard.writeText(section.url);panel.querySelector('#handoff-status').textContent=`Section ${index+1} link copied.`;}
+    catch{input.focus();input.select();panel.querySelector('#handoff-status').textContent='Link selected. Copy it with your keyboard or browser menu.';}
+   };
+   const share=card.querySelector('.navigation-share');
+   if(navigator.share){share.hidden=false;share.onclick=async()=>{try{await navigator.share({title:`BLUE route — section ${index+1}`,url:section.url});}catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='Sharing unavailable. Use Copy link or scan the QR code.';}};}
+   panel.querySelector('#navigation-sections').append(card);
+  }
+ }catch(error){panel.textContent=error.message;}
+ finally{if(button.isConnected)button.disabled=false;}
 }
 function initPanelResize(){
  const workspace=document.querySelector('.workspace'),divider=$('map-divider');
@@ -345,29 +476,121 @@ function initPanelResize(){
  window.addEventListener('afterprint',resize);
  resize();
 }
+function updateCapturedUsers(){
+ const options=new Map();
+ for(const cell of board){
+  if(typeof cell.captured_by!=='string'||!cell.captured_by.trim())continue;
+  const name=cell.captured_by.trim(),key=`user:${name.toLowerCase()}`;
+  const entry=options.get(key)||{name,count:0};entry.count++;options.set(key,entry);
+ }
+ const select=$('captured-by');select.replaceChildren();
+ const add=(value,label)=>{const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);};
+ add('all','All players');add('unknown','Unknown / unattributed');
+ for(const [key,entry] of [...options].sort((a,b)=>a[1].name.localeCompare(b[1].name)))add(key,`${entry.name} (${entry.count})`);
+ if(capturedUser.startsWith('user:')&&!options.has(capturedUser))add(capturedUser,`${capturedUser.slice(5)} (no attributed squares)`);
+ select.value=capturedUser;
+ if(!select.value){capturedUser='all';select.value='all';}
+ const attribution=feedMetadata?.attribution;
+ select.disabled=options.size===0 && capturedUser==='all';
+ $('captured-by-help').textContent=!attribution?.configured && options.size===0
+  ?'No player names in the board feed. Configure MESHWARS_API_KEY on the server to enable capture attribution.'
+  :`${options.size} players identified in current squares. Recent observed events only; unmatched squares stay Unknown. Filters combine with capture age. ${attribution?.error||''}`;
+}
+function renderFeedStatus(){
+ if(!feedMetadata)return;
+ const meta=feedMetadata;
+ const stamp=value=>value?new Date(value*1000).toLocaleString():'not yet';
+ const state=meta.refreshing?'Refreshing MeshWars…':meta.stale?'Using fallback data':'Live feed';
+ $('board-feed-status').textContent=`${state} · ${meta.coverage_count.toLocaleString()} squares. Last successful check: ${stamp(meta.last_success)}. Last attempt: ${stamp(meta.last_checked)}. Automatic check interval: ${meta.error?meta.retry_interval:meta.refresh_interval}s. ${meta.error||meta.cache_error||''}`;
+ document.querySelector('.board-feed').dataset.stale=String(meta.stale);
+ updateCapturedUsers();
+ $('board-route-warning').hidden=!(result && result.board_revision && result.board_revision!==boardRevision);
+}
+async function refreshBoard(full=false){
+ if(feedLoading)return;
+ feedLoading=true;
+ try{
+  let response=await fetch(full?'/api/board':'/api/board/status',{cache:'no-store'});
+  if(!response.ok)throw Error('Local board feed unavailable. Retrying automatically.');
+  let data=await response.json();
+  if(data.available && !Object.hasOwn(data,'coverage') && data.revision!==boardRevision){
+   response=await fetch('/api/board',{cache:'no-store'});
+   if(!response.ok)throw Error('Could not load the updated board. Retrying automatically.');
+   data=await response.json();
+  }
+  feedMetadata=data;
+  if(data.available && Array.isArray(data.coverage)){
+   board=data.coverage;boardRevision=data.revision;boardAvailable=true;
+   updateCapturedUsers();drawBoard();
+  }
+  renderFeedStatus();
+  if(!searching)$('submit').disabled=!boardAvailable;
+ }catch(error){
+  $('board-feed-status').textContent=`${error.message} ${boardAvailable?'The last loaded board remains available.':''}`;
+  document.querySelector('.board-feed').dataset.stale='true';
+ }finally{feedLoading=false;}
+}
+$('refresh-board').onclick=async()=>{
+ $('refresh-board').disabled=true;
+ try{
+  const response=await fetch('/api/board/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  if(!response.ok)throw Error('Could not request a refresh. Automatic checks will continue.');
+  $('board-feed-status').textContent='Refresh requested. Checking for updates…';
+  setTimeout(()=>refreshBoard(),1500);
+ }catch(error){$('board-feed-status').textContent=error.message;}
+ finally{setTimeout(()=>{$('refresh-board').disabled=false;},15000);}
+};
 async function init(){
  if(!window.L){$('status').textContent='Map library could not load. Check access to unpkg.com and reload.';$('submit').disabled=true;return;}
  map=L.map('map',{preferCanvas:true}).setView([40.6,-111.9],10);
+ const progressControl=L.control({position:'topright'});
+ progressControl.onAdd=()=>{
+  const panel=$('search-progress');
+  L.DomEvent.disableClickPropagation(panel);
+  L.DomEvent.disableScrollPropagation(panel);
+  return panel;
+ };
+ progressControl.addTo(map);
+ const sizeProgressPanel=()=>{$('search-progress').style.maxHeight=`${Math.max(80,map.getSize().y-20)}px`;};
+ map.on('resize',sizeProgressPanel);
+ sizeProgressPanel();
  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
  initPanelResize();
  territories=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);markers=L.layerGroup().addTo(map);targets=L.layerGroup().addTo(map);
  map.on('moveend',drawBoard);
- map.on('click',e=>{if(searching)return;const id=clickCount%2===0?'start':'end';if(clickCount%2===0){$('end').value='';clearAddress('end');}clearAddress(id);$(id).value=`${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;clickCount++;updateMarkers();});
+ map.on('click',e=>{
+  if(searching)return;
+  if(mapPickTarget){
+   const id=mapPickTarget;mapPickTarget=null;
+   clearAddress(id);$(id).value=`${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
+   updateMarkers();$('status').textContent='Waypoint set. Add more stops or find BLUE opportunities.';return;
+  }
+  const id=clickCount%2===0?'start':'end';
+  if(clickCount%2===0){$('end').value='';clearAddress('end');}
+  clearAddress(id);$(id).value=`${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
+  clickCount++;updateMarkers();
+ });
  ['start','end'].forEach(id=>$(id).addEventListener('change',updateMarkers));
- try{
-  const response=await fetch('/api/board');if(!response.ok)throw Error('Could not read local board.');
-  const data=await response.json();board=data.coverage;
-  const last=Math.max(...board.map(c=>c.last_report_ts||0));
-  $('status').textContent=`${board.length.toLocaleString()} known squares loaded. Latest report: ${new Date(last*1000).toLocaleString()}. Zoom in to see territory colors.`;
-  drawBoard();
- }catch(e){$('status').textContent=e.message;$('submit').disabled=true;}
+ $('submit').disabled=true;
+ await refreshBoard(true);
+ $('status').textContent=boardAvailable?'Choose start and destination to plan a drive.':'Waiting for capture data; automatic checks will continue.';
+ setInterval(()=>refreshBoard(),30*60*1000);
 }
 function setSearching(active){
  searching=active;
+ const progress=$('search-progress');
+ if(active){progress.dataset.meshState='searching';progress.querySelector('.mesh-caption').textContent='Exploring the mesh';}
+ else{
+  const complete=$('progress-bar').value===100;
+  progress.dataset.meshState=complete?'complete':'idle';
+  progress.querySelector('.mesh-caption').textContent=complete?'Route search complete':'Mesh standing by';
+ }
  for(const id of ['start','end','start-lookup','end-lookup','budget','strategy','submit','print'])$(id).disabled=active;
  $('submit').textContent=active ? 'Searching routes…' : 'Find BLUE opportunities →';
+ $('submit').disabled=active||!boardAvailable;
  $('results').setAttribute('aria-busy',String(active));
- document.querySelectorAll('.address-options button, #comparison button').forEach(button=>button.disabled=active);
+ document.querySelectorAll('.address-options button, #comparison button, #waypoints input, #waypoints button').forEach(button=>button.disabled=active);
+ refreshWaypointLabels();
 }
 async function streamedPlan(payload, onProgress, signal){
  const response=await fetch('/api/plan-stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal});
@@ -407,19 +630,21 @@ $('planner').addEventListener('submit',async e=>{
   updateTime();timer=setInterval(updateTime,1000);
   $('progress-stage').textContent='Checking start and destination…';
   const start=await resolveLocation('start',searchController.signal);
+  const requiredWaypoints=[];
+  for(const id of waypointIds())requiredWaypoints.push(await resolveLocation(id,searchController.signal));
   const end=await resolveLocation('end',searchController.signal);
-  if(!start || !end){
+  if(!start || !end || requiredWaypoints.some(point=>!point)){
    $('status').textContent='Choose the matching addresses below the inputs, then find BLUE opportunities again.';
    $('progress-stage').textContent='Waiting for address selection';return;
   }
   updateMarkers();
-  const requestedLabels={start:$('start').value,end:$('end').value};
-  const data=await streamedPlan({start,end,detour_minutes:Number($('budget').value),strategy:$('strategy').value},event=>{
+  const requestedLabels={start:$('start').value,end:$('end').value,waypoints:waypointIds().map(id=>$(id).value)};
+  const data=await streamedPlan({start,end,waypoints:requiredWaypoints,detour_minutes:Number($('budget').value),strategy:$('strategy').value},event=>{
    lastUpdate=Date.now();$('progress-bar').value=event.percent;
    $('progress-percent').textContent=`${Math.floor(event.percent)}%`;
    $('progress-stage').textContent=event.message;updateTime();
   },searchController.signal);
-  result=data;tripLabels=requestedLabels;
+  result=data;tripLabels=requestedLabels;renderFeedStatus();
   $('progress-bar').value=100;$('progress-percent').textContent='100%';$('progress-stage').textContent='Search complete';
   showComparison();showActiveResult();
   $('status').textContent=`${data.strategy==='beam'?'Beam':'Greedy'}: ${data.routes.length} route options within budget. ${data.routing_metrics?.workers||1} routing workers; average request ${data.routing_metrics?.mean_request_seconds||0}s (including queue/rate-limit waits). ${data.failed_candidates ? `${data.failed_candidates} detour requests failed. ` : ''}Green outlines show targets; capture is not guaranteed.`;

@@ -324,7 +324,54 @@ def refine_routes(start, end, cells, seeds, cap, router, strategy, report, worke
     return all_states, {'refinement_requests':completed,'failed_candidates':failures,'beam_width':width}
 
 
-def search_routes(start, end, cells, budget_seconds, router, progress=None, strategy='beam', workers=4):
+def validate_waypoints(waypoints):
+    if waypoints is None:
+        return []
+    if not isinstance(waypoints,list) or len(waypoints)>8:
+        raise ValueError('Provide at most eight ordered waypoints.')
+    result=[]
+    for point in waypoints:
+        if not isinstance(point,list) or len(point)!=2:
+            raise ValueError('Waypoints must be [longitude, latitude].')
+        if any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in point):
+            raise ValueError('Waypoint coordinates must be finite numbers.')
+        x,y=point
+        if not -180<=x<=180 or not -90<=y<=90:
+            raise ValueError('Waypoint coordinates out of range.')
+        result.append(list(point))
+    return result
+
+
+def initial_detours(start,end,cells,budget,required):
+    """Explore each required leg fairly, with a shared bound on routing requests."""
+    if not required:
+        return [[p] for p in exploration_points(start,end,cells,budget)]
+    chain=[start,*required,end]
+    queues=[exploration_points(a,b,cells,budget/(len(chain)-1)) for a,b in zip(chain,chain[1:])]
+    result=[]
+    for depth in range(max((len(q) for q in queues),default=0)):
+        for leg,queue in enumerate(queues):
+            if depth<len(queue):
+                result.append(required[:leg]+[queue[depth]]+required[leg:])
+                if len(result)>=16:
+                    return result
+    return result
+
+
+def route_stop_labels(via,required):
+    labels=[]
+    manual=0
+    for point in via:
+        if manual<len(required) and point==required[manual]:
+            manual+=1
+            labels.append(f'W{manual}')
+        else:
+            labels.append('exploration detour')
+    return labels
+
+
+def search_routes(start, end, cells, budget_seconds, router, progress=None, strategy='beam', workers=4, waypoints=None):
+    required=validate_waypoints(waypoints)
     if isinstance(workers,bool) or not isinstance(workers,int) or not 1 <= workers <= 16:
         raise ValueError('Routing workers must be between 1 and 16.')
     if strategy not in ('greedy','beam','compare'):
@@ -350,7 +397,9 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
             began=time.monotonic()
             failed=False
             try:
-                future.set_result(router(points,alternatives))
+                routes=router(points,alternatives)
+                via=[list(p) for p in points[1:-1]]
+                future.set_result([dict(r,via_points=via,stop_labels=route_stop_labels(via,required)) for r in routes])
             except BaseException as error:
                 failed=True
                 future.set_exception(error)
@@ -358,23 +407,23 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
                 with cache_lock:
                     provider_timings.append((time.monotonic()-began,failed))
         return future.result()
-    report(2,'Finding the fastest baseline route…')
-    base=cached_router([start,end],True)
+    report(2,'Finding the fastest baseline through your waypoints…' if required else 'Finding the fastest baseline route…')
+    base=cached_router([start,*required,end],not required)
     baseline=min(base,key=lambda r:r['duration'])
     scored_base=opportunity_score(baseline,cells)
     cap=baseline['duration']+budget_seconds
-    trials=[(r,[]) for r in base]
+    trials=[(r,list(required)) for r in base]
     failures=0
-    points=exploration_points(start,end,cells,budget_seconds) if budget_seconds else []
-    report(10,f'Checking {len(points)} territory detours with up to {workers} routing workers…')
+    detours=initial_detours(start,end,cells,budget_seconds,required) if budget_seconds else []
+    report(10,f'Checking {len(detours)} territory detours with up to {workers} routing workers…')
     def exploration_progress(done,total):
         report(10+40*done/max(1,total),f'Checked {done} of {total} territory detours.')
-    outcomes=routing_batch([[start,p,end] for p in points],cached_router,workers,exploration_progress)
-    for p,(routes,error) in zip(points,outcomes):
+    outcomes=routing_batch([[start,*via,end] for via in detours],cached_router,workers,exploration_progress)
+    for via,(routes,error) in zip(detours,outcomes):
         if error:
             failures+=1
         else:
-            trials.extend((r,[p]) for r in routes)
+            trials.extend((r,via) for r in routes)
     report(50,'Scoring shared detours…')
     seeds=[(opportunity_score(r,cells),via) for r,via in trials if r['duration']<=cap+1e-6]
     modes=['greedy','beam'] if strategy=='compare' else [strategy]
@@ -403,7 +452,7 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
     active='beam' if strategy=='compare' else strategy
     report(95,'Ranking routes and preparing driving directions…')
     chosen=results[active]
-    response=dict(chosen,baseline=scored_base,team='BLUE',strategy=active,
+    response=dict(chosen,baseline=scored_base,team='BLUE',strategy=active,required_waypoints=required,
                   shared_provider_requests=shared_requests,total_provider_requests=provider_requests,
                   routing_metrics={'workers':workers,'mean_request_seconds':round(sum(t for t,_ in provider_timings)/max(1,len(provider_timings)),2),
                                    'failed_requests':sum(failed for _,failed in provider_timings)},

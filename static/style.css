@@ -8,6 +8,9 @@
 
 select{width:100%;padding:12px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--text);font:inherit}#comparison{padding:24px 30px 0}#comparison h2{margin-top:0}.comparison-table{width:100%;border-collapse:collapse;background:var(--surface);font-size:12px}.comparison-table td,.comparison-table th{text-align:left;padding:11px;border-bottom:1px solid var(--border)}.comparison-table th{color:var(--muted);font-weight:600}.comparison-table button{font-size:11px;padding:6px}.comparison-table tr.active{background:var(--soft)}#comparison .fine{margin-bottom:0}@media(max-width:800px){#comparison{padding:20px 12px 0}.comparison-table td,.comparison-table th{padding:7px 4px;font-size:10px}}@media print{#comparison{display:none!important}}
 
+/* Search progress stays over the map while the sidebar scrolls. */
+#map #search-progress{width:300px;max-width:calc(100vw - 76px);margin:10px 10px 0 0;overflow:auto;overscroll-behavior:contain;box-shadow:0 4px 18px #0003;font-family:Inter,system-ui,sans-serif;color:var(--text)}
+#map #search-progress[hidden]{display:none}
 /* Keep map and directions inside a shared, resizable workspace. */
 @media screen{
  body{height:100vh;height:100dvh;display:flex;flex-direction:column;min-height:360px}
@@ -54,3 +57,36 @@ input::placeholder{color:var(--muted);opacity:1}
 .square-darkness-control{margin:16px 0 22px;padding:12px;border:1px solid var(--border);border-radius:7px;background:var(--field)}.square-darkness-control label{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px}.square-darkness-control output{color:var(--accent);font-variant-numeric:tabular-nums}#square-darkness,#square-contrast,#capture-days{display:block;width:100%;height:24px;margin:0;padding:0;border:0;background:transparent;accent-color:var(--accent);cursor:pointer}.range-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--muted)}.square-darkness-control .fine{margin:9px 0 0}
 
 .square-darkness-control label[for="square-contrast"],.square-darkness-control label[for="capture-days"]{margin-top:18px}
+
+.board-feed{margin-top:18px;padding:12px;border:1px solid var(--border);border-radius:7px;background:var(--field);font-size:12px}.board-feed-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.board-feed-heading button{padding:6px 9px;font-size:11px}.board-feed p{margin:9px 0 0;font-size:11px}.board-feed[data-stale="true"]{border-color:#b88b43}#board-route-warning{color:var(--secondary)}
+
+.square-darkness-control label[for="captured-by"]{margin-top:18px}
+
+.manual-waypoints{margin:20px 0;padding:12px;border:1px solid var(--border);border-radius:7px;background:var(--field)}.waypoint-heading{font-size:12px}.waypoint-heading small{display:inline;font-size:10px;font-weight:400}.waypoint-row{padding:12px 0;border-bottom:1px solid var(--border)}.waypoint-row label{margin:0 0 8px}.waypoint-actions,.waypoint-add{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.waypoint-actions button,.waypoint-add button{padding:6px 8px;font-size:10px}.waypoint-actions .lookup{margin:0}.manual-waypoints .fine{margin-bottom:0}
+
+.route-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}#navigation-handoff{padding:18px;margin:12px 0 24px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:12px}#navigation-handoff h3{margin-top:0}.handoff-note{padding:12px;background:var(--soft);border-radius:6px}#navigation-sections{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:16px;margin-top:18px}.navigation-section{padding:14px;border:1px solid var(--border);border-radius:7px}.navigation-section h4{margin:0 0 8px}.navigation-qr{margin:12px auto;max-width:300px}.navigation-qr canvas{display:block;width:100%;height:auto;background:#fff;image-rendering:pixelated}.navigation-open{display:inline-block;padding:10px;background:#2463df;border-radius:6px;color:#fff;text-decoration:none;font-weight:600}.navigation-url{margin-top:10px;font-size:10px}.navigation-section button{font-size:11px}.routehead{flex-wrap:wrap}@media print{#navigation-handoff,.route-actions{display:none!important}}
+
+.handoff-file-actions{margin-top:10px}#navigation-handoff textarea{width:100%;min-height:140px;margin-top:12px;background:var(--field);color:var(--text);border:1px solid var(--border);border-radius:6px}
+
+/* Mesh packets are decorative; actual progress remains in the progress bar. */
+.mesh-animation{margin:-3px 0 12px;position:relative;border-bottom:1px solid var(--border);padding-bottom:9px}
+.mesh-animation svg{display:block;width:100%;height:100px}
+.mesh-grid-line{stroke:var(--accent);stroke-opacity:.08;stroke-width:1}
+.mesh-links{stroke:var(--grip);stroke-opacity:.4;stroke-width:1.5;stroke-linejoin:round}
+.mesh-territory rect{fill:var(--accent);opacity:.1}
+.mesh-caption{display:block;font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--secondary);margin-top:1px}
+.mesh-nodes circle{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+.mesh-packet{stroke:var(--accent);stroke-width:3;stroke-linecap:round;stroke-dasharray:3 97;opacity:0}
+.mesh-winning-path{stroke:var(--accent);stroke-width:3;stroke-linejoin:round;opacity:0;transition:opacity .5s}
+[data-mesh-state="searching"] .mesh-packet{opacity:1;animation:mesh-hop 3.2s linear infinite}
+[data-mesh-state="searching"] .mesh-packet-two{animation-delay:-1.6s;stroke-width:2;opacity:.65}
+[data-mesh-state="searching"] .mesh-nodes circle{animation:mesh-pulse 3.2s ease-in-out infinite;animation-delay:var(--node-delay,0s)}
+[data-mesh-state="searching"] .mesh-territory rect{animation:mesh-capture 4.8s ease-in-out infinite}
+[data-mesh-state="searching"] .mesh-territory rect:nth-child(2){animation-delay:-1.6s}
+[data-mesh-state="searching"] .mesh-territory rect:nth-child(3){animation-delay:-3.2s}
+[data-mesh-state="complete"] .mesh-winning-path{opacity:1}
+[data-mesh-state="complete"] .mesh-territory rect{opacity:.3}
+@keyframes mesh-hop{from{stroke-dashoffset:3}to{stroke-dashoffset:-97}}
+@keyframes mesh-pulse{0%,35%,100%{fill:var(--surface);stroke-width:2}15%{fill:var(--accent);stroke-width:4}}
+@keyframes mesh-capture{0%,100%{opacity:.08}50%{opacity:.35}}
+@media(prefers-reduced-motion:reduce){.mesh-animation *{animation:none!important;transition:none!important}[data-mesh-state="searching"] .mesh-packet{opacity:0}[data-mesh-state="searching"] .mesh-winning-path{opacity:.45}}

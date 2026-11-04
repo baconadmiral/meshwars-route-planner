@@ -56,3 +56,11 @@ Store only a small, sanitized response fixture after inspecting real data. Avoid
 ## Planning implications
 
 Ownership alone does not establish whether a square can be captured. The planner also needs the user's team, road access, likely radio coverage, and any available capture constraints. Absence from the board must not be interpreted as confirmed absence of coverage. Count each candidate square once per route.
+
+## Automatic feed implementation
+
+The local application now polls this endpoint in a background worker (default 300 seconds / 5 minutes), using conditional requests when supported. Validated boards replace the in-memory snapshot atomically, and a Git-ignored `.cache/board.json` stores the last good payload and response validators. The optional original `../nodes.json` remains a fallback and is not modified. A failed refresh preserves previous data and is shown in the interface. Route searches pin their starting board revision; newer revisions prompt a new search rather than changing an active optimization. Live endpoint behavior remains unverified in this restricted development environment; automated tests use mocked responses.
+
+## Player attribution
+
+The inspected board has no capturing-player field. The documented integration capture feed (`/api/v1/captures?board=meshcore`) includes `cell_id`, `ts`, `player`, and `team`, and requires an integration key in `X-API-Key`. Optional `capture_users.py` polls that feed using the server environment and enriches squares as `captured_by` only when the event matches both current owner and `captured_at`. This is explicitly partial recent-event coverage, with unmatched records left unattributed. The frontend combines player and capture-age filters and never receives the key.
