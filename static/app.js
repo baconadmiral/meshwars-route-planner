@@ -348,7 +348,7 @@ function showRoute(index){
   if(step.maneuver.type==='arrive')text=legIndex===r.legs.length-1?'Arrive at destination B':`Reach ${r.stop_labels?.[legIndex]||'exploration detour'}; continue to the next leg`;
   steps.push(`<li><span>${escape(text)}</span><small>${miles(step.distance)}</small></li>`);
  }));
- $('results').innerHTML=`<div class="cards">${cards}</div><div class="routehead"><h2>Your driving directions</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-handoff">Navigate / send to phone</button><button id="download">GeoJSON</button></div></div><div id="navigation-handoff" hidden></div><p class="trip">A: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → B: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p><ol class="steps">${steps.join('')}</ol>`;
+ $('results').innerHTML=`<div class="cards">${cards}</div><div class="routehead"><h2>Your driving directions</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-modal" aria-haspopup="dialog">Navigate / send to phone</button><button id="download">GeoJSON</button></div></div><p class="trip">A: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → B: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p><ol class="steps">${steps.join('')}</ol>`;
  document.querySelectorAll('[data-route]').forEach(el=>el.onclick=()=>showRoute(Number(el.dataset.route)));
  $('phone-navigation').onclick=()=>openNavigation(r);
  $('download').onclick=()=>{
@@ -373,16 +373,32 @@ function drawQr(container,url){
  }catch{container.textContent='Could not generate QR. Copy the link instead.';}
 }
 async function openNavigation(route){
- const panel=$('navigation-handoff'),button=$('phone-navigation');
- if(!panel.hidden){panel.hidden=true;button.setAttribute('aria-expanded','false');return;}
- panel.hidden=false;button.disabled=true;button.setAttribute('aria-expanded','true');
+ const button=$('phone-navigation');
+ if($('navigation-modal'))return;
+ const modal=document.createElement('dialog');
+ modal.id='navigation-modal';modal.setAttribute('aria-labelledby','navigation-modal-title');
+ modal.innerHTML='<div class="navigation-modal-heading"><h2 id="navigation-modal-title">Take this drive on your phone</h2><button type="button" id="navigation-close" autofocus aria-label="Close phone navigation">Close ×</button></div><div id="navigation-handoff"></div>';
+ document.body.append(modal);
+ const panel=modal.querySelector('#navigation-handoff'),controller=new AbortController();
+ modal.querySelector('#navigation-close').onclick=()=>modal.close();
+ modal.addEventListener('click',event=>{
+  if(event.target!==modal)return;
+  const bounds=modal.getBoundingClientRect();
+  if(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)modal.close();
+ });
+ modal.addEventListener('close',()=>{
+  controller.abort();modal.remove();document.body.classList.remove('navigation-modal-open');
+  if(button.isConnected){button.disabled=false;button.setAttribute('aria-expanded','false');button.focus();}
+ },{once:true});
+ modal.showModal();document.body.classList.add('navigation-modal-open');
+ button.disabled=true;button.setAttribute('aria-expanded','true');
  panel.textContent='Preparing navigation links and GPX track…';
  try{
-  const response=await fetch('/api/route-export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route:{geometry:route.geometry,via_points:route.via_points||[],stop_labels:route.stop_labels||[]}})});
+  const response=await fetch('/api/route-export',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({route:{geometry:route.geometry,via_points:route.via_points||[],stop_labels:route.stop_labels||[]}})});
   const data=await response.json();if(!response.ok)throw Error(data.error||'Export failed.');
   // A route switch may have removed this panel while export was being prepared.
   if(!panel.isConnected)return;
-  panel.innerHTML=`<h3>Take this drive on your phone</h3><p>Scan a QR code with your phone camera to open Google Maps. No email or access to this local app is needed. For longer routes, copy/share all section links to your phone before leaving, then finish each section and open the next one.</p><p class="handoff-note">Google Maps recalculates roads between the stops and may skip capture streets. Check its preview before starting. GPX preserves the complete planned track for a compatible track-following app; it does not contain spoken instructions.</p><div class="route-actions"><button id="navigation-copy-all">Copy all navigation links</button><button id="navigation-share-all" hidden>Share all links</button></div><div class="route-actions handoff-file-actions"><button id="gpx-download">Download GPX track</button><button id="gpx-share" hidden>Share GPX file</button></div><p class="fine">Transfer the GPX file using AirDrop, Quick Share, your files/cloud app, or email. Import it in a navigation app that supports following GPX tracks. ${data.trackpoint_count.toLocaleString()} track points retained.</p><div id="navigation-sections"></div><p id="handoff-status" role="status" aria-live="polite"></p>`;
+  panel.innerHTML=`<p>Scan a QR code with your phone camera to open Google Maps. No email or access to this local app is needed. For longer routes, copy/share all section links to your phone before leaving, then finish each section and open the next one.</p><div id="navigation-sections"></div><p class="handoff-note">Google Maps recalculates roads between the stops and may skip capture streets. Check its preview before starting. GPX preserves the complete planned track for a compatible track-following app; it does not contain spoken instructions.</p><div class="route-actions"><button id="navigation-copy-all">Copy all navigation links</button><button id="navigation-share-all" hidden>Share all links</button></div><div class="route-actions handoff-file-actions"><button id="gpx-download">Download GPX track</button><button id="gpx-share" hidden>Share GPX file</button></div><p class="fine">Transfer the GPX file using AirDrop, Quick Share, your files/cloud app, or email. Import it in a navigation app that supports following GPX tracks. ${data.trackpoint_count.toLocaleString()} track points retained.</p><p id="handoff-status" role="status" aria-live="polite"></p>`;
   const allLinks=data.sections.map((section,index)=>`Section ${index+1}/${data.sections.length}: ${section.from_label} → ${section.to_label}\n${section.url}`).join('\n\n');
   const allLinksText=`MeshWars BLUE drive — Google may recalculate roads. Open sections in order.\n\n${allLinks}`;
   panel.querySelector('#navigation-copy-all').onclick=async()=>{
@@ -414,7 +430,7 @@ async function openNavigation(route){
    if(navigator.share){share.hidden=false;share.onclick=async()=>{try{await navigator.share({title:`BLUE route — section ${index+1}`,url:section.url});}catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='Sharing unavailable. Use Copy link or scan the QR code.';}};}
    panel.querySelector('#navigation-sections').append(card);
   }
- }catch(error){panel.textContent=error.message;}
+ }catch(error){if(panel.isConnected && error.name!=='AbortError')panel.textContent=error.message;}
  finally{if(button.isConnected)button.disabled=false;}
 }
 function initPanelResize(){

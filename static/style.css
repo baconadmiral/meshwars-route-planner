@@ -90,3 +90,14 @@ input::placeholder{color:var(--muted);opacity:1}
 @keyframes mesh-pulse{0%,35%,100%{fill:var(--surface);stroke-width:2}15%{fill:var(--accent);stroke-width:4}}
 @keyframes mesh-capture{0%,100%{opacity:.08}50%{opacity:.35}}
 @media(prefers-reduced-motion:reduce){.mesh-animation *{animation:none!important;transition:none!important}[data-mesh-state="searching"] .mesh-packet{opacity:0}[data-mesh-state="searching"] .mesh-winning-path{opacity:.45}}
+
+/* Native dialog supplies focus containment, Escape, and the top-layer backdrop. */
+#navigation-modal{width:min(720px,calc(100vw - 32px));max-height:calc(100dvh - 40px);padding:0;margin:auto;border:1px solid var(--border);border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 24px 80px #0005;overflow:auto;overscroll-behavior:contain}
+#navigation-modal::backdrop{background:rgb(5 14 28 / 65%)}
+.navigation-modal-heading{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 22px;background:var(--surface);border-bottom:1px solid var(--border)}
+.navigation-modal-heading h2{font-size:19px;margin:0}
+#navigation-close{flex-shrink:0}
+#navigation-modal #navigation-handoff{margin:0;padding:0 22px 22px;border:0;border-radius:0}
+body.navigation-modal-open{overflow:hidden}
+@media(max-width:500px){.navigation-modal-heading{padding:14px;gap:10px}.navigation-modal-heading h2{font-size:16px}#navigation-modal #navigation-handoff{padding:0 14px 14px}#navigation-close{padding:8px 10px}}
+@media print{#navigation-modal{display:none!important}}

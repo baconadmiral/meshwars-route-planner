@@ -252,6 +252,38 @@ def distinct_states(states, limit):
     return selected
 
 
+def diverse_states(states, limit, minimum_difference=0.):
+    """Balance capture value with new territory, always retaining the best route.
+
+    Difference is Jaccard distance over all crossed grid cells, including BLUE.
+    The frontier uses a soft preference; final options require 20% difference.
+    """
+    ranked=distinct_states(states,len(states)+1)
+    if not ranked or limit<=0:
+        return []
+    footprints=[route_grid_cells(route['geometry']['coordinates']) for route,_ in ranked]
+    selected=[0]
+    remaining=list(range(1,len(ranked)))
+    best_value=max(1.,ranked[0][0].get('capture_value',ranked[0][0]['target_count']))
+    while remaining and len(selected)<limit:
+        candidates=[]
+        for index in remaining:
+            difference=min(len(footprints[index]^footprints[other])/max(1,len(footprints[index]|footprints[other]))
+                           for other in selected)
+            if difference+1e-9<minimum_difference:
+                continue
+            route=ranked[index][0]
+            quality=route.get('capture_value',route['target_count'])/best_value
+            candidates.append((.65*quality+.35*difference,-index,index))
+        if not candidates:
+            break
+        chosen=max(candidates)[2]
+        selected.append(chosen)
+        remaining.remove(chosen)
+    # Preserve familiar value/duration ordering after selecting the alternatives.
+    return [ranked[index] for index in sorted(selected)]
+
+
 def routing_batch(jobs, router, workers, progress):
     """Run independent requests concurrently, but return results in input order."""
     if not jobs:
@@ -282,7 +314,7 @@ def refine_routes(start, end, cells, seeds, cap, router, strategy, report, worke
     width=6 if strategy=='beam' else 1
     maximum=3*4*width
     all_states=list(seeds)
-    frontier=distinct_states(seeds,width)
+    frontier=diverse_states(seeds,width) if strategy=='beam' else distinct_states(seeds,width)
     seen_jobs=set()
     completed=failures=0
     for depth in range(3):
@@ -320,7 +352,7 @@ def refine_routes(start, end, cells, seeds, cap, router, strategy, report, worke
         else:
             # Advance a full depth, even if a branch initially gains fewer squares.
             # Earlier incumbents remain in all_states and can never be lost.
-            frontier=distinct_states(children,width)
+            frontier=diverse_states(children,width)
     return all_states, {'refinement_requests':completed,'failed_candidates':failures,'beam_width':width}
 
 
@@ -442,6 +474,8 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
             states,stats=seeds,{'refinement_requests':0,'failed_candidates':0,'beam_width':6 if mode=='beam' else 1}
         ranked=[r for r,_ in distinct_states(states,len(states)+1)]
         useful=[r for r in ranked if r['target_count']>0]
+        if mode=='beam':
+            useful=[r for r,_ in diverse_states([(r,[]) for r in useful],6,minimum_difference=.2)]
         results[mode]={
             'routes':useful[:6 if mode=='beam' else 3], 'failed_candidates':failures+stats['failed_candidates'],
             'no_opportunities':not useful,

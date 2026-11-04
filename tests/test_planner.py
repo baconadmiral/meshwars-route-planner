@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from http.server import HTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from planner import choose, intersects, score, candidate_points, opportunity_score, exploration_points, search_routes, route_grid_cells, insertion_proposals, route_anchors, routing_batch, target_value, owner_score, route_rank, validate_waypoints, initial_detours, LAT_STEP, LON_STEP
+from planner import choose, intersects, score, candidate_points, opportunity_score, exploration_points, search_routes, route_grid_cells, insertion_proposals, route_anchors, routing_batch, target_value, owner_score, route_rank, validate_waypoints, initial_detours, diverse_states, LAT_STEP, LON_STEP
 from server import Handler, point, SearchCancelled
 
 CELL = dict(cell_id='test', owner_team='RED', west=0, east=1, south=0, north=1)
@@ -219,13 +219,39 @@ class BeamSearchTests(unittest.TestCase):
 
     def test_beam_returns_six_distinct_routes_and_greedy_stays_at_three(self):
         start,end=[.0001,.0001],[.001,.0001]
-        candidates=[route([start,[(n+.5)*LON_STEP,.0001],end]) for n in range(1,7)]
+        import math
+        candidates=[route([start,[.04*math.cos(n*math.pi/3),.04*math.sin(n*math.pi/3)],end]) for n in range(6)]
         result=search_routes(start,end,[],0,lambda *args:candidates,strategy='compare')
         beam=result['strategy_results']['beam']['routes']
         greedy=result['strategy_results']['greedy']['routes']
         self.assertEqual(len(beam),6)
         self.assertEqual(len(greedy),3)
         self.assertEqual(len({str(r['geometry']) for r in beam}),6)
+
+    def test_diversity_removes_near_duplicates_but_preserves_best(self):
+        states=[]
+        for index,value in enumerate((100,99,85)):
+            candidate=route([[index,0],[index,1]])
+            candidate.update(capture_value=value,target_count=value)
+            states.append((candidate,[]))
+        footprints=[set(range(100)),set(range(99))|{100},set(range(50,150))]
+        with patch('planner.route_grid_cells',side_effect=footprints):
+            selected=diverse_states(states,6,minimum_difference=.2)
+        self.assertEqual([state[0]['capture_value'] for state in selected],[100,85])
+
+    def test_frontier_prefers_different_branch_without_forcing_six_options(self):
+        states=[]
+        for index,value in enumerate((100,99,90)):
+            candidate=route([[index,0],[index,1]])
+            candidate.update(capture_value=value,target_count=value)
+            states.append((candidate,[]))
+        footprints=[set(range(100)),set(range(99)),set(range(100,200))]
+        with patch('planner.route_grid_cells',side_effect=footprints):
+            selected=diverse_states(states,2)
+        self.assertEqual([state[0]['capture_value'] for state in selected],[100,90])
+        with patch('planner.route_grid_cells',return_value=set(range(100))):
+            selected=diverse_states(states,6,minimum_difference=.2)
+        self.assertEqual(len(selected),1)
 
     def test_invalid_strategy_rejected_before_routing(self):
         router=unittest.mock.Mock()
