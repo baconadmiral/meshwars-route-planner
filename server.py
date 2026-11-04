@@ -3,6 +3,8 @@ import argparse
 import json
 import math
 import os
+import threading
+import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import Request, urlopen
@@ -14,12 +16,37 @@ from geocoder import lookup_address
 ROOT = Path(__file__).resolve().parent
 ROUTER = os.environ.get('OSRM_URL', 'https://router.project-osrm.org').rstrip('/')
 
+ROUTING_WORKERS = int(os.environ.get('OSRM_WORKERS', '4'))
+if not 1 <= ROUTING_WORKERS <= 16:
+    raise ValueError('OSRM_WORKERS must be between 1 and 16.')
+PUBLIC_ROUTER = urlparse(ROUTER).hostname in ('router.project-osrm.org', 'routing.openstreetmap.de')
+ROUTING_INTERVAL = float(os.environ.get('OSRM_REQUEST_INTERVAL', '1' if PUBLIC_ROUTER else '0'))
+if not math.isfinite(ROUTING_INTERVAL) or ROUTING_INTERVAL < 0:
+    raise ValueError('OSRM_REQUEST_INTERVAL must be a finite, nonnegative number.')
+if PUBLIC_ROUTER:
+    ROUTING_INTERVAL = max(1., ROUTING_INTERVAL)
+_ROUTING_SLOTS = threading.BoundedSemaphore(ROUTING_WORKERS)
+_REQUEST_START_LOCK = threading.Lock()
+_LAST_REQUEST_START = 0.
+
+
+def routing_response(url):
+    """Bound outstanding requests and space provider calls across all searches."""
+    global _LAST_REQUEST_START
+    with _ROUTING_SLOTS:
+        with _REQUEST_START_LOCK:
+            delay = ROUTING_INTERVAL-(time.monotonic()-_LAST_REQUEST_START)
+            if delay > 0:
+                time.sleep(delay)
+            _LAST_REQUEST_START = time.monotonic()
+        with urlopen(Request(url, headers={'User-Agent': 'MeshWarsBluePlanner/0.1'}), timeout=20) as response:
+            return json.load(response)
+
 
 def fetch_routes(points, alternatives=False):
     coordinates = ';'.join(','.join(str(v) for v in p) for p in points)
     url = f'{ROUTER}/route/v1/driving/{coordinates}?steps=true&overview=full&geometries=geojson&alternatives={str(alternatives).lower()}'
-    with urlopen(Request(url, headers={'User-Agent': 'MeshWarsBluePlanner/0.1'}), timeout=20) as response:
-        data = json.load(response)
+    data = routing_response(url)
     if data.get('code') != 'Ok' or not data.get('routes'):
         raise ValueError('No driving route found for these locations.')
     return data['routes']
@@ -88,6 +115,9 @@ class Handler(BaseHTTPRequestHandler):
             budget = float(data.get('detour_minutes', 15))*60
             if not math.isfinite(budget) or not 0 <= budget <= 7200:
                 raise ValueError('Detour must be between 0 and 120 minutes.')
+            strategy = data.get('strategy', 'beam')
+            if strategy not in ('greedy', 'beam', 'compare'):
+                raise ValueError('Search strategy must be greedy, beam, or compare.')
             if self.path == '/api/plan-stream':
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/x-ndjson')
@@ -98,9 +128,9 @@ class Handler(BaseHTTPRequestHandler):
                 streaming = True
                 self.close_connection = True
                 result = search_routes(start, end, self.server.board['coverage'], budget, fetch_routes,
-                                       lambda update: self.send_event('progress', update))
+                                       lambda update: self.send_event('progress', update), strategy=strategy, workers=ROUTING_WORKERS)
                 return self.send_event('result', result)
-            return self.send_json(search_routes(start, end, self.server.board['coverage'], budget, fetch_routes))
+            return self.send_json(search_routes(start, end, self.server.board['coverage'], budget, fetch_routes, strategy=strategy, workers=ROUTING_WORKERS))
         except SearchCancelled:
             return
         except (ValueError, KeyError, TypeError) as error:
