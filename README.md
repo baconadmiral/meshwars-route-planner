@@ -1,17 +1,17 @@
 # MeshWars Route Planner
 
-A local, Meshtastic route planner with a territory map and printable, MapQuest-style turn-by-turn directions. It prioritizes easy-to-capture enemy squares and unpainted exploration within a maximum extra-driving-time budget.
+A self-hostable Meshtastic route planner with a territory map and printable, MapQuest-style turn-by-turn directions. It prioritizes easy-to-capture enemy squares and unpainted exploration within a maximum extra-driving-time budget.
 
 ## Run locally
 
-Requires Python 3.10+ and an internet connection for address lookup, routing, map tiles, and the Leaflet map library. No package installation is required.
+Requires Python 3.10+ and an internet connection for address lookup, routing, map tiles, and the Leaflet map library. The local development server uses only the standard library. The hosted entry point and full test suite additionally use the pinned packages in `requirements.txt`.
 
 ```sh
 cd ~/OTHER_DEV/meshwars-route-planner
 python3 server.py
 ```
 
-Open **http://127.0.0.1:8000**. The server fetches MeshWars immediately and checks for updates every 5 minutes. The browser checks local feed status every 15 seconds and loads changed boards without reloading the page. The **Capture data** panel shows successful checks, errors/fallback status, and a **Refresh now** button.
+Open **http://127.0.0.1:8000**. The server fetches MeshWars immediately and checks for updates every 30 minutes. The browser loads the board initially and checks for changes every 30 minutes. During startup without a board it briefly checks local readiness; those checks do not trigger upstream requests. The **Capture data** panel shows successful checks, errors/fallback status, and a **Refresh now** button.
 
 The existing `../nodes.json` is an optional startup fallback. The latest successfully validated live board is saved atomically in `.cache/board.json` (Git-ignored), and reused on restart. Your original `nodes.json` is not overwritten. The app can start without either file and will enable planning once its first live fetch succeeds.
 
@@ -20,6 +20,58 @@ To use another snapshot or port:
 ```sh
 python3 server.py --board /path/to/nodes.json --port 8080
 ```
+
+## Container hosting
+
+The portable deployment uses **Flask + Waitress** (`hosting.py`), rather than exposing the development `http.server` entry point. Keep one application process/replica: background feed ownership, provider request pacing, caches, and search admission limits are currently process-local. Python explicitly [does not recommend `http.server` for production](https://docs.python.org/3/library/http.server.html).
+
+Requires Docker Engine with the Compose plugin. Create `.env` from `.env.example` on the host, keeping real credentials out of source control. No API key is required for normal territory planning; FreqMapper observations still need an approved partner key.
+
+```sh
+docker compose config --quiet
+docker build --target test -t meshwars-route-planner:test .
+docker compose up -d --build
+```
+
+The default deployment publishes only **http://127.0.0.1:8000** on the Docker host. Use it locally, through an SSH tunnel, or behind an authenticated reverse proxy. It does not publish a public website by itself. `PLANNER_PORT` changes the host port; the internal container port remains 8000. HTTPS is required for device location when using a remote hostname.
+
+The image runs as UID/GID **10001**, has a read-only root filesystem in Compose, drops Linux capabilities, and has bounded memory/CPU/process usage. `/data` is its persistent named volume; `/tmp` is temporary. Docker context allowlisting excludes credentials, personal board snapshots, environment metadata, caches, and Git history. Production images omit tests. Dependencies are pinned; base image tags should be refreshed and rebuilt regularly for security fixes.
+
+At startup, the app reads its last successful board from `/data/board.json`, or optionally a seed at `/data/seed-board.json`, and starts the live feed. Existing local `.cache` files are not automatically migrated into the named volume. With no seed/cache, planning waits for the first successful fetch. Optional radio evidence and cursors use the same volume. Do not share these files between running replicas.
+
+Hosted behavior includes JSON/body-size validation, same-origin POST checks, basic response security headers, and an immediate **429** with `Retry-After` when search capacity is full. The default `MAX_CONCURRENT_SEARCHES=2` shares the configured OSRM worker/rate budget. Progress is streamed as NDJSON with buffering disabled and blank-line keepalives. Disconnects stop search work at the next progress checkpoint; already-issued provider requests can run until their timeout. Request bodies and personal locations are not written to access logs. The short-lived geocoder cache remains in memory.
+
+### HTTPS and invited-user access
+
+An optional Caddy configuration supplies automatic HTTPS and a password gate. Set `PLANNER_DOMAIN`, `PLANNER_USER`, and `PLANNER_PASSWORD_HASH` in `.env`. Generate a bcrypt hash interactively using Caddy so a real password does not enter shell history:
+
+```sh
+docker run --rm -it caddy:2-alpine caddy hash-password
+```
+
+Single-quote the hash in `.env` so its `$` characters remain literal. Point the hostname’s DNS to the deployment host and permit inbound TCP ports 80/443. Then the deployment command is:
+
+```sh
+docker compose -f compose.yaml -f compose.https.yaml up -d --build
+```
+
+This configuration uses Caddy’s documented [password authentication](https://caddyserver.com/docs/caddyfile/directives/basic_auth) and [`flush_interval -1`](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy) to preserve incremental search updates. Keep the backend’s localhost binding. A host-level proxy can instead target port 8000; a container proxy on the Compose network targets `planner:8000`. Keep both Caddy volumes to preserve certificates. The proxy configuration has been validated, but public DNS, certificate issuance, and a real-host HTTPS deployment have not been performed. Do not disable authentication for an internet-facing deployment without first planning abuse controls and upstream service capacity.
+
+### OpenStreetMap tile access
+
+The hosted responses use `Referrer-Policy: strict-origin-when-cross-origin`. OpenStreetMap [requires a valid browser referrer](https://operations.osmfoundation.org/policies/tiles/); `no-referrer` conflicts with its tile policy and can produce “Access blocked” 403 tiles. External requests receive only the site origin, not page paths or query strings. Do not override this with a referrer-stripping proxy header. Browser privacy extensions can also suppress referrers. Tiles load directly in the browser with its normal HTTP caching; there is no tile scraping or proxy.
+
+After updating a Docker deployment, rebuild/recreate the app and reload its page to pick up the response header. If cached 403 tiles persist, clear this site's cached images/files once. Continued blocking needs investigation of the actual request headers or existing provider restrictions; changing this header does not guarantee an existing block is immediately lifted.
+
+### Operations and remaining hosting decisions
+
+- **Health:** `/healthz` reports application liveness; `/readyz` returns 503 until a board is available. The Docker health check uses liveness, so an upstream outage does not cause restart loops. Monitor readiness and feed freshness separately.
+- **Data and secrets:** back up the `planner-data` volume off-host, and the Caddy volumes when used. Stop the application for a consistent volume snapshot. Keep the `.env`/secret-manager backup separate and restricted. A normal Compose shutdown preserves volumes; avoid `down -v` for real deployments.
+- **Updates:** run the container tests, rebuild with refreshed base images, and recreate the service. Retain a known-good image tag for rollback. The GitHub Actions workflow builds/tests the image on pushes and pull requests; it does not publish or deploy.
+- **External services:** configure `OSRM_URL`, `OSRM_WORKERS`, `OSRM_REQUEST_INTERVAL`, and `PHOTON_URL` for a provider suitable for your usage. Public demo services are the development defaults, not a promised production capacity or SLA. Map tiles and Leaflet/QR libraries also require external network access; library versions are fixed in the page but remain CDN-hosted.
+- **Public launch:** choose the host/domain, authentication approach, uptime/freshness monitoring, backup destination, and routing/geocoding capacity. Anonymous public access additionally needs per-user/IP quotas and stronger abuse controls. Horizontal scaling needs shared admission/rate limits and one feed/cache owner first.
+
+Validation performed here: production image build; 117 tests inside the image; actual Waitress socket startup, health/readiness, incremental route output, cache persistence, and SIGTERM shutdown against local deterministic providers; hardened Compose startup, volume persistence across restart, and Caddy configuration validation. No real domain or cloud account was modified, and no image was pushed to a registry.
 
 ## Automatic capture feed
 
@@ -47,7 +99,7 @@ Coverage is partial: the initial request reads at most 500 recent events; later 
 
 ## Plan a drive
 
-1. Select **Your team** (BLUE by default), then set A and B. Enter an **address or place name**, choose **Find address**, and select the correct match. Include city and state or ZIP code to narrow the results. You can also enter **latitude, longitude** or click the map to set A and B. Mix addresses and coordinates freely. A third map click starts a new pair. Submitting an unresolved address also performs lookup and asks you to choose a match before routing. Editing a selected address clears its saved location.
+1. Select **Your team** (BLUE by default), then set A and B. Enter an **address or place name**, choose **Find address**, hover over or keyboard-focus a result to preview its pin on the map, and select the correct match. The map pans to an offscreen preview and zooms to street level when needed. A preview does not select a stop or verify road access; check access for places such as airport terminals, garages, and restricted facilities. Include city and state or ZIP code to narrow the results. You can also enter **latitude, longitude** or click the map to set A and B. Mix addresses and coordinates freely. A third map click starts a new pair. Submitting an unresolved address also performs lookup and asks you to choose a match before routing. Editing a selected address clears its saved location.
 2. Optionally add ordered manual waypoints using **Add waypoint** or **Pick on map**. Then set the maximum additional driving time, from 0 to 120 minutes. Choose **Beam search** (default), **Greedy** (the previous method), or **Compare beam vs. greedy**.
 3. Choose **Find [your team] opportunities**. A live progress bar shows the search stage and completed detours, with elapsed time and time since the last server update. Slow provider requests display a waiting message. Percentages represent search work, not estimated time remaining. The search may take several minutes if routing requests time out. Use **Cancel search** to stop; a request already sent to the provider may take until its timeout to release the server task.
 4. Compare up to six beam route options (up to three for greedy), the fastest-route baseline, and numbered directions. In Compare mode, a table shows each method’s weighted value, raw target count, driving time, and refinement checks. Use **Show route** to switch the map and directions without rerunning the search.
@@ -65,9 +117,15 @@ The map shows team-colored cells with score-based faint-to-bold fills, visually 
 
 After selecting a route, choose **Navigate / send to phone** to open a centered QR and sharing dialog. Close it with **Close ×**, Escape, or a click outside the dialog; focus returns to the navigation button. Each navigation section has **Open Google Maps**, a camera-scannable QR code, **Copy link**, and (when supported by the browser) a native **Share link** button. Scan a QR from the desktop to open its Google Maps URL directly on your phone: the phone does not need access to the local Python server, and no route-hosting service or email is required. QR codes are generated in the browser with a CDN-loaded QR library; coordinates are not sent to a QR-image service.
 
-All manual and exploration stops are retained in order. Long routes are divided into sections with at most three intermediate stops per Google Maps link, respecting the documented mobile-browser waypoint limit. Sections overlap at their boundary stop. Use **Copy all navigation links** or **Share all links** to transfer the complete ordered list before leaving, then open sections in sequence. Google Maps can open a preview rather than immediately start navigation depending on the device/location; review it and start when ready. [Google Maps URL documentation](https://developers.google.com/maps/documentation/urls/get-started).
+The dialog opens on **Route preview**. A separate map shows the complete planned road geometry and numbered pins for the exact coordinates exported to Google Maps. Gaps longer than 2 km along the planned track are highlighted with amber dashes; select a gap to zoom to it, or choose **Fit whole route**. This threshold is a visual review aid, not a prediction of Google’s road choices: even shorter gaps can be rerouted. Stops are matched to the road track in trip order to estimate gap distances; off-road stops retain their original exported coordinates and may snap differently in Google. The preview shows how many intermediate stops and QR sections will be sent. Choose **QR & sharing** when ready. This preview does not fetch or compare Google’s actual calculated geometry, and it does not add automatic anchors.
+
+All manual and exploration stops are retained in order. Exports target the Google Maps app on Android and iPhone: drives with up to nine intermediate stops use one link and QR code. Longer drives split into sections with at most nine intermediate stops per link. Mobile browsers support only three intermediate stops, so open the link in the Google Maps app to retain the full stop list. Sections overlap at their boundary stop. Use **Copy all navigation links** or **Share all links** to transfer the complete ordered list before leaving, then open sections in sequence. Google Maps can open a preview rather than immediately start navigation depending on the device/location; review it and start when ready. [Google Maps URL documentation](https://developers.google.com/maps/documentation/urls/get-started).
 
 Google recalculates roads between the stops and may skip planned capture streets. For the complete geometry, use **Download GPX track**. The GPX retains every route coordinate and stop, without simplifying the track. It contains no spoken maneuver instructions; import it into an app that supports following GPX tracks and review that app’s handling of the track. Google Maps does not import a GPX track through these direction links.
+
+**GPX for OsmAnd → Create GPX download QR** creates an expiring download URL for the full GPX track, with QR, copy-link, native link sharing, and download controls. Scan it on the phone, download the file, then use **Share → OsmAnd** to import it. It is not a direct OsmAnd navigation deep link. The QR contains a URL, not embedded track data, so your phone must be able to reach the planner’s current address. A localhost-only address will not work from a phone; the interface explicitly labels that condition. No LAN/public binding is enabled automatically by this feature. Once the planner is hosted at a reachable address, links use that same origin automatically. Existing proxy authentication still applies to downloads.
+
+GPX links are created only when you choose the button. They expire after one hour or a server restart and are stored in memory only, with random 192-bit tokens. Anyone holding a link can download that route while it is valid, subject to the site’s login gate. Downloads disable caching and referrers. Storage is bounded to 100 links / 32 MiB total / 8 MiB per file; capacity errors leave existing links valid. Expired or missing links return 404. Both `python3 server.py` and the container’s hosted API support the same feature. Links are process-local, consistent with the deployment’s single-replica requirement. Creating a new link does not revoke older unexpired links. The plain file download remains available without creating a link.
 
 **Share GPX file** appears when the browser supports sharing that file type. Otherwise download it and transfer it using AirDrop, Quick Share, your usual file/cloud app, or email. Native sharing targets depend on your device; no messages or emails are sent automatically. Browser/device handoff and QR scanning have not been verified in this sandbox. If the QR library cannot load, copy/share links remain available.
 
@@ -83,9 +141,64 @@ The time budget is relative to the fastest route **through all manual waypoints*
 
 Choose **My location** below the map zoom buttons to center the map on your device at street level. Allow the browser’s location request; a dot marks the reported position and a circle shows its accuracy. This is a one-time lookup on each click and does not change your route endpoints. Device location requires HTTPS or localhost.
 
+## Limit driving to a drawn area
+
+Choose **Draw box on map**, then click or tap two opposite corners around the area you want to drive in. A preview follows the pointer after the first corner; the finished area has an amber dashed outline. Choose **Cancel drawing** or press Escape to abandon a drawing, draw another box to replace it, or choose **Clear box** to remove the constraint. For an irregular area, choose **Draw freeform area**, click or tap corners along its boundary, then right-click on the map or choose **Finish shape**. Right-click finishes using the corners already placed; it does not add another corner. **Undo corner** removes the last corner. The server validates the shape before applying it; crossing edges, overlapping edges, holes, repeated corners, and empty shapes are rejected. Use 3–100 corners. Escape or the active drawing button cancels without changing the previous area. Switching drawing modes starts a new draft. Changing the area clears previous search results. One box or polygon is active at a time; these shapes reflect your own coverage knowledge and do not establish radio coverage.
+
+Start, destination, and all manual stops must be inside the selected area. Before routing starts, the app checks the resolved coordinates, lists each outside stop (A, B, W1, etc.), highlights its input, and focuses the first invalid field. The same check is enforced server-side for direct API requests. The server rejects every provider route whose road geometry leaves it, including initial alternatives and refinement routes. Boundaries are included. Boxes use vertex containment; concave polygons additionally split each road segment at boundary intersections and check the intervals, preventing shortcuts through excluded indentations even when both road vertices are inside. No outside detours are requested. Both search strategies and their comparison share the constraint. The time budget is relative to the fastest *returned route that remains inside* the area.
+
+The routing provider does not accept the shape as a road-avoidance rule: we filter its returned routes. If it returns no contained baseline, the app reports an error; enlarge/clear the shape or add guiding waypoints. A valid contained route can exist without the provider returning it. The selected box or GeoJSON Polygon is included in `allowed_bounds` in the result and GeoJSON metadata. Google Maps navigation can recalculate outside the area, so inspect its preview; the GPX preserves the constrained planned track.
+
+## Radio coverage evidence (optional)
+
+The **Show FreqMapper observations** map toggle displays independent verified transmit observations in green and passive receive observations as purple rings. These are measured points, not continuous road coverage. Zoom in when more than 2,000 observations are in view. The source status shows freshness, incomplete history, and refresh failures independently from the MeshWars board.
+
+Each route and the fastest baseline receive an evidence breakdown. A square counts only when it contains an observation within 50 metres of the actual route geometry. Multiple observations count once per square; verified TX takes precedence over RX-only evidence. Counts are also reported for target squares separately. These are historical observations, not capture probabilities or proof that the whole square is covered. Route scores, budgets, and ranking remain unchanged. GeoJSON exports include the selected route’s evidence counts.
+
+Live evidence requires an approved FreqMapper partner key. Set `FREQMAPPER_PARTNER_TOKEN` in the server environment and optionally `FREQMAPPER_REGION` (default `SLC`), then restart the server. Keep the key server-side; never paste it into browser code, URLs, version control, or chat. Without a key, the feature shows the source as disconnected and labels coverage unknown.
+
+`radio_coverage.py` uses only the documented production [combined partner feed](https://help.freqmapper.net/verified-coverage-api/), with explicitly typed `verified_tx` and `passive_rx` records. It does not scrape browser tiles. The feed excludes failed, pending, not-heard tests, and ordinary Position Packet coverage. Empty responses and missing evidence never imply failure. Consequently there is no red/not-heard overlay or reliability-based route weighting yet. Those require a supported negative-evidence source.
+
+The adapter checks at startup and every 30 minutes, importing up to four pages of 1,000 events per check. Initial history may require several checks. It saves each complete page and cursor atomically in Git-ignored `.cache/radio_coverage.json`, retaining observations and their event time but stripping radio/participant identifiers and never storing the key. Region changes do not reuse another region’s cache. Access/configuration errors (401/403/404/422) pause automatic requests until restart after configuration is corrected; rate-limit retry delays are respected. Other failures retain previous evidence and mark it stale. Cache size is bounded at 100,000 observations; reaching that limit reports an error instead of silently discarding history.
+
+Searches pin the radio-evidence snapshot at their start and annotate results consistently across both strategies. `/api/radio-coverage` supplies evidence and availability metadata to the local UI. Browser startup may check this local endpoint briefly while the first import completes; these checks do not trigger upstream requests. No partner key or live integration was used in automated validation.
+
+The selected navigation line uses a contrasting color rather than your team color (yellow for BLUE, cyan for RED/ORANGE/PINK, magenta for GREEN/YELLOW, and yellow for PURPLE), with a dark outline for readability over square fills and both map themes. The handoff preview uses the same route color; numbered export pins retain the team color.
+
+## Clear a route or hide captured squares
+
+**Clear route**, beside the navigation and GeoJSON buttons, removes route lines, target outlines, bonus-place markers, comparison results, directions, and completed progress. Start/destination/waypoint inputs, the drawn area, and scoring/display settings remain available for another search. The button is disabled during a running search; cancel the search first.
+
+**Hide captured squares** in the sidebar toggles all teams’ owned-square fills and captured-square target outlines. The route and unpainted target outlines remain visible, subject to existing display filters. The button changes to **Show captured squares** to restore the layer and the choice persists in this browser. This only changes display: scoreboard totals and route scoring continue to use the full board.
+
+## Team scores and color filters
+
+The strip below the header shows **total points** and **squares currently held** for each team, ranked by total points. Total points come from MeshWars’ public Meshtastic scoreboard (`https://meshwars.com/scores`) and include territory, check-in, and exploration points. Hover a card for the breakdown. Squares held are current territory, not a count of all historical capture events; the board does not contain per-team lifetime capture counts. Per-square defense scores are not summed into this total.
+
+Click a team card to show only that team’s squares and target outlines. Click the same card again, or **All teams**, to clear the filter. The color filter combines with capture-age filtering. It does not change your planning team, route scoring, or the scoreboard totals. Your planning team and the active display filter have separate highlights. The strip uses the full board/scoreboard, regardless of map zoom.
+
+`team_scores.py` refreshes the scoreboard alongside the board on the existing 30-minute schedule, and on an explicit board refresh, without per-browser upstream polling. Last-good scores persist in `.cache/team_scores.json` (or the hosted `/data` directory). Cached or failed refreshes are labeled. If scores have never loaded, points remain **—**, while squares held can still come from the board. Hover the source note for score freshness. The public `/scores` route is the website’s own endpoint, not the versioned integration contract; responses are validated and schema/network failures retain previous totals. `MESHWARS_SCORES_URL` can override a compatible endpoint.
+
 ## Choose your team
 
 Use **Your team** above the start address to select BLUE (the default), RED, GREEN, PURPLE, YELLOW, ORANGE, or PINK. Your team’s territory is excluded from enemy targets throughout exploration, refinement, and scoring. Other teams are scored using the current owner’s score. Changing teams clears the previous plan; run a new search. Route colors, labels, GeoJSON, and GPX exports reflect the selected team.
+
+## Place bonuses in route weighting
+
+**Places Worth Going** is enabled by default. The planner loads this week’s active summits, parks, and landmarks from MeshWars’ public `/api/places` feed once per search area, explicitly for the Meshtastic board. Responses are cached in memory for 30 minutes (up to eight areas); searches share the same pinned place data across beam and greedy. No player key or personal visit history is fetched. The source list can be truncated, and its public geometry is intended for display; the UI identifies bonus scoring as an estimate. The endpoint is the website’s own evolving interface, so malformed/unavailable data falls back to territory-only ranking, or same-week cached data.
+
+The objective is **territory priority + bonus weight × estimated place points**. The default weight is 1 and can be set from 0 to 5. Estimated place points are capped by **Weekly place points remaining** (0–100, default 100). Bonus opportunities influence initial detours, refinements, and final ranking; a route through friendly territory can still be useful for places. The same road-time budget, mandatory stops, box/polygon containment, request limits, and beam diversity checks continue to apply. Initial discovery reserves up to eight of its sixteen requests for place candidates. Returned road geometry, rather than the requested point, determines whether an estimated scoring area was crossed.
+
+Following the game’s [place rules](https://meshwars.com/rules), only the highest-value eligible place on a square can count. The planner uses the game’s published tie-break formula, counts each place once per route, and applies the remaining weekly cap. Mark a place **Already visited this week** in its map popup or route results; a used higher-value place still blocks lower-value overlaps. Settings changes require a new search rather than silently changing an existing result. Visit marks and remaining budget apply only to this browser session and are not confirmed game history. On a new scoring week (Wednesday, Mountain time), previously tagged settings are reset to an assumed 100 points remaining; check that value against your actual activity before planning. Most-recent claiming team is not treated as your personal visit status.
+
+Eligibility estimates deliberately avoid broad proximity claims:
+
+- **Landmarks and rotating small parks:** their point’s grid cell and its eight neighbors.
+- **Boundary-backed parks/forests:** public boundary cells plus one neighboring ring, including hole boundaries. Deep interiors and entire bounding boxes are not rewarded. The game can also allow an interior boundary band; our simplified-outline estimate can miss valid cells or differ near boundaries.
+- **Summits:** only the peak’s own grid cell. The public feed does not provide the elevation-qualified neighboring cells, so a road below or near a summit does not receive its bonus just for being within 1.5 km.
+- **Other parks without a returned boundary:** if their point-based eligibility cannot be distinguished from a missing large-park outline, no bonus is guessed.
+
+Routes show estimated place points separately from territory priority, plus names/types of potential places. Place markers appear after a search, independently of team-color square filters. GeoJSON includes the bonus estimate and matched places. These are potential points, not awarded points: prior visits, weekly usage, actual scoring pings, coverage, current game eligibility, and road access can prevent a payout. There is no live terrain/altitude verification. Trip query envelopes above five degrees, oversized source responses, or excessive geometry are bounded rather than scanned globally; incomplete results are indicated. Use `MESHWARS_PLACES_URL` only for a compatible source.
 
 ## How route selection works
 
@@ -156,10 +269,17 @@ Browser assets load from unpkg.com; map tiles load from OpenStreetMap. The appli
 
 ## Structure and verification
 
-- `server.py`: local HTTP API and OSRM adapter.
+- `server.py`: local development HTTP API, shared input validation, and OSRM adapter.
+- `hosting.py`: production Flask API, Waitress lifecycle, and bounded streaming searches.
+- `Dockerfile`, `compose*.yaml`, `deploy/Caddyfile`: portable runtime, persistent storage, and optional authenticated HTTPS.
 - `board_feed.py`: background board polling, validation, conditional requests, and durable fallback cache.
 - `capture_users.py`: optional authenticated capture-event polling and conservative player attribution.
+- `route_bounds.py`: validated WGS84 boxes and simple polygons, including concave road-segment containment.
+- `radio_coverage.py`: supported FreqMapper partner evidence, durable cursors, and route evidence counts.
+- `places.py`: active-place adapter, bounded cache, conservative bonus areas, overlap/cap handling, and detour proposals.
+- `team_scores.py`: validated Meshtastic team totals and last-good scoreboard cache.
 - `teams.py`: supported teams and shared input validation.
+- `gpx_shares.py`: bounded, expiring in-memory GPX download links.
 - `navigation.py`: mobile-compatible Google Maps sections and complete GPX track serialization.
 - `planner.py`: geometry intersections, candidate selection, and route ranking.
 - `geocoder.py`: Photon integration, response normalization, and bounded in-memory lookup cache.
@@ -167,14 +287,20 @@ Browser assets load from unpkg.com; map tiles load from OpenStreetMap. The appli
 - `tests/`: deterministic scoring and HTTP-handler tests with mocked routing.
 - `docs/meshwars-integration.md`: observed board schema and remaining questions.
 
-Run checks:
+Run the full checks using the tested Docker build above. With `requirements.txt` installed, the equivalent Python checks are:
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m py_compile server.py planner.py geocoder.py board_feed.py capture_users.py navigation.py teams.py
+python3 -m py_compile server.py planner.py geocoder.py board_feed.py capture_users.py navigation.py teams.py radio_coverage.py route_bounds.py hosting.py gpx_shares.py team_scores.py places.py
 ```
 
-Automated tests cover exploration away from a BLUE-only corridor, unique unpainted counts, budget enforcement, zero-target handling, progress events, streaming errors, disconnected-search termination, address result parsing, query encoding/caching, input validation, lookup failure handling, missed-cell insertion, long straight road sampling, preservation of the faster route when geometry is duplicated, beam search escaping a greedy local optimum, shared-request reuse, beam request limits, bounded concurrency, serial/parallel result equivalence, in-flight deduplication, partial batch failures, provider request spacing, owner-score thresholds, missing/invalid scores, low-score targets outranking larger groups of 50-point squares, live-feed updates, conditional responses, failure fallback, cache persistence, manual refresh throttling, pinned search revisions, exact player/event matching, attribution caching, cursor replay, rejected-key fallback, ordered waypoint preservation in every provider request, constrained baseline budgets, repeated stops, invalid/unreachable waypoint handling, navigation section continuity, waypoint/URL limits, GPX coordinate retention and XML escaping, and the route-export endpoint. HTTP handlers are exercised in memory because this development sandbox prevents opening local sockets. Live provider requests and browser rendering have not been verified here; DNS, socket restrictions, and missing Node tooling prevent live preview and Sites packaging/publication.
+Automated tests cover exploration away from a BLUE-only corridor, unique unpainted counts, budget enforcement, zero-target handling, progress events, streaming errors, disconnected-search termination, address result parsing, query encoding/caching, input validation, lookup failure handling, missed-cell insertion, long straight road sampling, preservation of the faster route when geometry is duplicated, beam search escaping a greedy local optimum, shared-request reuse, beam request limits, bounded concurrency, serial/parallel result equivalence, in-flight deduplication, partial batch failures, provider request spacing, owner-score thresholds, missing/invalid scores, low-score targets outranking larger groups of 50-point squares, live-feed updates, conditional responses, failure fallback, cache persistence, manual refresh throttling, pinned search revisions, exact player/event matching, attribution caching, cursor replay, rejected-key fallback, ordered waypoint preservation in every provider request, constrained baseline budgets, repeated stops, invalid/unreachable waypoint handling, navigation section continuity, waypoint/URL limits, GPX coordinate retention and XML escaping, and the route-export endpoint. HTTP handlers are exercised in memory. The hosted runtime also has a real socket smoke test in the Docker test stage, using only local deterministic providers. The sharing dialog has also been rendered and tested in Chromium using mocked tiles and providers. Real OSRM/Photon calls, on-device navigation handoff, and an externally hosted deployment have not been verified.
+
+### Browser handoff regression checks
+
+The test-only project in `tests/browser` uses pinned Playwright, Leaflet, and QR libraries. It loads the real UI in Chromium with fully mocked APIs and tiles; it makes no requests to OSM, MeshWars, or routing providers. It covers no area, a box, a polygon, a mobile viewport, preview failure fallback, place markers and visited-place controls, Maps QR rendering, GPX QR creation, and closing/reopening the dialog. The fixture is a synthetic route. Browser dependencies and screenshots are excluded from production images.
+
+Use the matching `mcr.microsoft.com/playwright:v1.64.1-noble` test image with this repository mounted at `/app`, working directory `/app/tests/browser`, then run `npm ci --ignore-scripts` and `npm test`. The same checks run in the GitHub Actions browser job. A screenshot is written to `tests/browser/test-results/handoff-preview.png` (Git-ignored).
 
 ## References
 
@@ -184,3 +310,9 @@ Automated tests cover exploration away from a BLUE-only corridor, unique unpaint
 - [OpenStreetMap attribution](https://www.openstreetmap.org/copyright)
 
 A deterministic mocked-road regression demonstrates greedy collecting 4 target squares while beam collects 9 under the same driving-time cap. This verifies branching behavior, not expected improvement on live roads. Live comparisons require running Compare mode on your machine.
+
+### Saved trips and route value
+
+Use **Saved trips** to store up to 30 named trip setups in this browser. Trips include entered locations and selected address coordinates, ordered waypoints, team, box or polygon, driving budget, strategy, and place bonus settings. Choose a trip to load, update, or delete it; select the empty option to save a new trip. Loading clears the displayed route and requires a fresh search. Saved trips contain locations, remain on this browser/device, and are removed when its site data is cleared. Review weekly place points remaining when reusing a trip.
+
+Each selected route includes a territory priority breakdown: easy enemy squares contribute 1 each, defended enemy squares contribute 1 / owner score², unknown enemy scores contribute 0.5, and unpainted exploration squares contribute 1. Friendly squares contribute no territory priority. Each square counts once. Estimated place points, after visited-place exclusions and the weekly cap, are multiplied by the selected bonus weight and added to territory priority. This ranks route opportunities; it is not a prediction of game points or confirmed captures.

@@ -1,0 +1,11 @@
+**
+!Dockerfile
+!requirements.txt
+!*.py
+!static/
+!static/**
+!tests/
+!tests/**
+!LICENSE
+**/node_modules/
+**/test-results/

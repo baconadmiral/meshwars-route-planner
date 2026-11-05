@@ -1,0 +1,26 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PLANNER_DOMAIN: ${PLANNER_DOMAIN:?Set the deployment hostname}
+      PLANNER_USER: ${PLANNER_USER:?Set the login username}
+      PLANNER_PASSWORD_HASH: ${PLANNER_PASSWORD_HASH:?Set a Caddy password hash}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      planner:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  caddy-data:
+  caddy-config:

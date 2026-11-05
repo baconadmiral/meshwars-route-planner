@@ -13,11 +13,17 @@ from urllib.parse import urlparse
 from planner import search_routes
 from geocoder import lookup_address
 from board_feed import BoardFeed
+from team_scores import TeamScores
+from places import PlacesFeed, place_options
 from capture_users import CaptureUsers
 from navigation import build_export
+from gpx_shares import GPXShares, ShareCapacityError
 from teams import validate_team
+from route_bounds import validate_bounds, validate_stops, StopsOutsideArea
+from radio_coverage import RadioCoverage, annotate_routes
 
 ROOT = Path(__file__).resolve().parent
+LOCAL_GPX_SHARES = GPXShares()
 ROUTER = os.environ.get('OSRM_URL', 'https://router.project-osrm.org').rstrip('/')
 
 ROUTING_WORKERS = int(os.environ.get('OSRM_WORKERS', '4'))
@@ -67,6 +73,26 @@ def point(value):
     return [x, y]
 
 
+def parse_plan_request(data):
+    if not isinstance(data, dict):
+        raise ValueError('Expected a JSON object.')
+    team = validate_team(data.get('team', 'BLUE'))
+    allowed_bounds = validate_bounds(data.get('allowed_bounds'))
+    start, end = point(data['start']), point(data['end'])
+    raw_waypoints = data.get('waypoints', [])
+    if not isinstance(raw_waypoints, list) or len(raw_waypoints) > 8:
+        raise ValueError('Provide at most eight ordered waypoints.')
+    required_waypoints = [point(value) for value in raw_waypoints]
+    validate_stops(start,end,required_waypoints,allowed_bounds)
+    budget = float(data.get('detour_minutes', 15))*60
+    if not math.isfinite(budget) or not 0 <= budget <= 7200:
+        raise ValueError('Detour must be between 0 and 120 minutes.')
+    strategy = data.get('strategy', 'beam')
+    if strategy not in ('greedy', 'beam', 'compare'):
+        raise ValueError('Search strategy must be greedy, beam, or compare.')
+    return start, end, required_waypoints, budget, strategy, team, allowed_bounds
+
+
 class SearchCancelled(Exception):
     """The browser disconnected from a streaming search."""
 
@@ -93,10 +119,30 @@ class Handler(BaseHTTPRequestHandler):
             data['coverage'] = self.server.board['coverage']
         return data
 
+    def radio_snapshot(self):
+        feed = getattr(self.server, 'radio_coverage', None)
+        return (feed or RadioCoverage(ROOT/'.cache'/'radio_coverage.json')).snapshot()
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ('/api/board', '/api/board/status'):
             return self.send_json(self.board_snapshot(include_coverage=path == '/api/board'))
+        if path.startswith('/api/gpx-shares/') and path.endswith('.gpx'):
+            token=path[len('/api/gpx-shares/'):-4]
+            item=LOCAL_GPX_SHARES.get(token)
+            if item is None:
+                return self.send_json({'error':'GPX link expired or not found. Create a new GPX QR code.'},404)
+            self.send_response(200)
+            self.send_header('Content-Type','application/gpx+xml')
+            self.send_header('Content-Disposition',f'attachment; filename="{item["filename"]}"')
+            self.send_header('Cache-Control','no-store')
+            self.send_header('Referrer-Policy','no-referrer')
+            self.send_header('X-Content-Type-Options','nosniff')
+            self.send_header('Content-Length',str(len(item['body'])))
+            self.end_headers()
+            return self.wfile.write(item['body'])
+        if path == '/api/radio-coverage':
+            return self.send_json(self.radio_snapshot())
         assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if path not in assets:
             return self.send_error(404)
@@ -110,15 +156,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path not in ('/api/plan', '/api/plan-stream', '/api/geocode', '/api/board/refresh', '/api/route-export'):
+        if self.path not in ('/api/plan', '/api/plan-stream', '/api/geocode', '/api/board/refresh', '/api/route-export', '/api/validate-route-area', '/api/gpx-shares'):
             return self.send_error(404)
         streaming = False
         try:
             length = int(self.headers.get('Content-Length', 0))
-            limit = 5*1024*1024 if self.path == '/api/route-export' else 4096
+            limit = 5*1024*1024 if self.path in ('/api/route-export','/api/gpx-shares') else 16384
             if not 0 < length <= limit:
                 raise ValueError('Invalid request size.')
             data = json.loads(self.rfile.read(length))
+            if self.path == '/api/validate-route-area':
+                if any(key in data for key in ('start','end','waypoints')):parse_plan_request(data)
+                return self.send_json({'allowed_bounds': validate_bounds(data.get('allowed_bounds'))})
+            if self.path == '/api/gpx-shares':
+                return self.send_json(LOCAL_GPX_SHARES.create(data.get('route') if isinstance(data,dict) else None),201)
             if self.path == '/api/route-export':
                 return self.send_json(build_export(data.get('route') if isinstance(data,dict) else None))
             if self.path == '/api/board/refresh':
@@ -132,22 +183,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json({'results': lookup_address(query.strip())})
                 except (URLError, TimeoutError, OSError, ValueError):
                     return self.send_json({'error': 'Address lookup unavailable. Retry or enter latitude, longitude instead.'}, 502)
-            team = validate_team(data.get('team', 'BLUE'))
-            start, end = point(data['start']), point(data['end'])
-            raw_waypoints = data.get('waypoints', [])
-            if not isinstance(raw_waypoints, list) or len(raw_waypoints) > 8:
-                raise ValueError('Provide at most eight ordered waypoints.')
-            required_waypoints = [point(value) for value in raw_waypoints]
-            budget = float(data.get('detour_minutes', 15))*60
-            if not math.isfinite(budget) or not 0 <= budget <= 7200:
-                raise ValueError('Detour must be between 0 and 120 minutes.')
-            strategy = data.get('strategy', 'beam')
-            if strategy not in ('greedy', 'beam', 'compare'):
-                raise ValueError('Search strategy must be greedy, beam, or compare.')
+            start, end, required_waypoints, budget, strategy, team, allowed_bounds = parse_plan_request(data)
+            bonus_options=place_options(data.get('place_options'))
+            places_feed=getattr(self.server,'places_feed',None)
             board_snapshot = self.board_snapshot()
             if board_snapshot.get('available') is False:
                 return self.send_json({'error': 'No board data available yet. Wait for the feed or provide --board.'}, 503)
             coverage = board_snapshot['coverage']
+            radio_snapshot = self.radio_snapshot()
             if self.path == '/api/plan-stream':
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/x-ndjson')
@@ -158,12 +201,20 @@ class Handler(BaseHTTPRequestHandler):
                 streaming = True
                 self.close_connection = True
                 result = search_routes(start, end, coverage, budget, fetch_routes,
-                                       lambda update: self.send_event('progress', update), strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints, team=team)
+                                       lambda update: self.send_event('progress', update), strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints, team=team, allowed_bounds=allowed_bounds,
+                                       places_loader=places_feed.load if places_feed else None,place_options=bonus_options)
+                annotate_routes(result, radio_snapshot)
                 result['board_revision'] = board_snapshot.get('revision')
                 return self.send_event('result', result)
-            result = search_routes(start, end, coverage, budget, fetch_routes, strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints, team=team)
+            result = search_routes(start, end, coverage, budget, fetch_routes, strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints, team=team, allowed_bounds=allowed_bounds,
+                                       places_loader=places_feed.load if places_feed else None,place_options=bonus_options)
+            annotate_routes(result, radio_snapshot)
             result['board_revision'] = board_snapshot.get('revision')
             return self.send_json(result)
+        except StopsOutsideArea as error:
+            return self.send_json({'error':str(error),'outside_stops':error.stop_keys},400)
+        except ShareCapacityError as error:
+            return self.send_json({'error':str(error)},429)
         except SearchCancelled:
             return
         except (ValueError, KeyError, TypeError) as error:
@@ -190,17 +241,25 @@ def main():
                              key=os.environ.get('MESHWARS_API_KEY'),
                              api_url=os.environ.get('MESHWARS_API_URL', 'https://meshwars.com/api/v1'))
         feed = BoardFeed(args.board, ROOT/'.cache'/'board.json', capture_users=users,
+                         team_scores=TeamScores(ROOT/'.cache'/'team_scores.json',
+                                               url=os.environ.get('MESHWARS_SCORES_URL','https://meshwars.com/scores')),
                          url=os.environ.get('MESHWARS_BOARD_URL', 'https://meshwars.com/get-nodes'),
                          interval=float(os.environ.get('MESHWARS_REFRESH_SECONDS', '1800')))
     except ValueError as error:
         parser.error(str(error))
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+    server.radio_coverage = RadioCoverage(ROOT/'.cache'/'radio_coverage.json',
+                                          token=os.environ.get('FREQMAPPER_PARTNER_TOKEN'),
+                                          region=os.environ.get('FREQMAPPER_REGION', 'SLC'))
+    server.radio_coverage.start()
+    server.places_feed=PlacesFeed(os.environ.get('MESHWARS_PLACES_URL','https://meshwars.com/api/places'))
     server.board_feed = feed
     feed.start()
     print(f'MeshWars route planner: http://127.0.0.1:{args.port}', flush=True)
     try:
         server.serve_forever()
     finally:
+        server.radio_coverage.close()
         feed.close()
         server.server_close()
 

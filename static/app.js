@@ -1,14 +1,22 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let board = [], result = null, routeIndex = 0, clickCount = 0;
-let boardRevision=null,boardAvailable=false,feedMetadata=null,feedLoading=false;
+let boardRevision=null,boardAvailable=false,feedMetadata=null,feedLoading=false,boardStartupChecks=0;
 const colors = {BLUE:'#1656e8',RED:'#e44444',GREEN:'#2e9e65',PURPLE:'#8858be',YELLOW:'#d2a716',ORANGE:'#e88032',PINK:'#db6aa5'};
+const routeColors={BLUE:'#ffd43b',RED:'#00d4e8',GREEN:'#ff3ca0',PURPLE:'#ffd43b',YELLOW:'#ff3ca0',ORANGE:'#00d4e8',PINK:'#00d4e8'};
+const routeColor=team=>routeColors[team]||'#ffd43b';
 const selectedTeam=()=>$('team').value;
-let map, territories, routeLayer, markers, targets;
+let map, territories, routeLayer, markers, targets, radioLayer, bonusPlacesLayer;
+let excludedPlaceIds=new Set(),placeScoringWeek=null;
+let radioSnapshot=null,radioStartupChecks=0;
+let mapTeamFilter=null,capturedSquaresHidden=false;
+try{capturedSquaresHidden=localStorage.getItem('hide-captured-squares')==='true';}catch{}
 let searching = false, searchController = null;
 const selectedLocations = {};
+let addressPreview=null;
 let tripLabels = null;
 let waypointCounter=0,mapPickTarget=null;
+let allowedBounds=null,areaDrawing=null,areaLayer=null,areaPreview=null;
 $('cancel-search').onclick = () => searchController?.abort();
 const systemTheme=window.matchMedia('(prefers-color-scheme: dark)');
 let explicitTheme=null;
@@ -41,7 +49,24 @@ function locationPoint(id){
  if(selected && selected.label===$(id).value.trim())return selected.coordinates;
  return coordinates($(id).value);
 }
+function clearAddressPreview(button=null){
+ if(!addressPreview||(button&&addressPreview.button!==button))return;
+ addressPreview.marker.remove();addressPreview=null;
+}
+function previewAddress(match,button,id){
+ if(!map||button.disabled)return;
+ clearAddressPreview();
+ const point=[match.coordinates[1],match.coordinates[0]];
+ const label=document.createElement('span');label.textContent=`Preview: ${match.label}`;
+ const marker=L.marker(point,{interactive:false,keyboard:false,zIndexOffset:1000,opacity:.85})
+  .addTo(map).bindTooltip(label,{permanent:true,direction:'top',offset:[0,-35],className:'address-preview-tooltip'});
+ addressPreview={marker,button,id};
+ map.stop();
+ if(map.getZoom()<15)map.setView(point,16,{animate:false});
+ else if(!map.getBounds().pad(-.15).contains(point))map.panTo(point,{animate:false});
+}
 function clearAddress(id){
+ if(addressPreview?.id===id)clearAddressPreview();
  delete selectedLocations[id];$(id+'-matches').replaceChildren();
 }
 async function resolveLocation(id,signal){
@@ -51,16 +76,22 @@ async function resolveLocation(id,signal){
  }
  const query=$(id).value.trim();
  if(query.length<3)throw Error('Enter an address or latitude, longitude for each stop.');
+ if(addressPreview?.id===id)clearAddressPreview();
  const choices=$(id+'-matches');choices.textContent='Looking up address…';
  const response=await fetch('/api/geocode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query}),signal});
  const data=await response.json();
  if(!response.ok){choices.textContent=data.error;throw Error(data.error||'Address lookup failed.');}
  choices.replaceChildren();
  if(!data.results.length){choices.textContent='No matches. Add city, state, or ZIP code, or use coordinates.';return null;}
- const title=document.createElement('p');title.textContent='Choose the correct location:';choices.append(title);
+ const title=document.createElement('p');title.textContent='Hover or focus a result to preview its pin, then select it. Check road access before choosing:';choices.append(title);
  for(const match of data.results){
   const button=document.createElement('button');button.type='button';button.textContent=match.label;
+  button.addEventListener('pointerenter',()=>previewAddress(match,button,id));
+  button.addEventListener('focus',()=>previewAddress(match,button,id));
+  button.addEventListener('pointerleave',()=>{if(document.activeElement!==button)clearAddressPreview(button);});
+  button.addEventListener('blur',()=>{if(!button.matches(':hover'))clearAddressPreview(button);});
   button.onclick=()=>{
+   clearAddressPreview();
    $(id).value=match.label;selectedLocations[id]=match;
    choices.textContent=`Selected: ${match.coordinates[1].toFixed(6)}, ${match.coordinates[0].toFixed(6)}`;
    updateMarkers();map.panTo([match.coordinates[1],match.coordinates[0]]);
@@ -109,6 +140,7 @@ function refreshWaypointLabels(){
  if(markers)updateMarkers();
 }
 function pickWaypoint(id){
+ cancelAreaDrawing();
  if(searching)return;
  mapPickTarget=id;
  const index=waypointIds().indexOf(id);
@@ -237,6 +269,8 @@ function squareStyle(cell){
          fillColor:`rgb(${rgb.join(',')})`,fillOpacity:intensity*scoreOpacity};
 }
 function captureVisible(cell,now=Date.now()/1000){
+ if(capturedSquaresHidden&&cell)return false;
+ if(mapTeamFilter&&cell?.owner_team!==mapTeamFilter)return false;
  if(captureDays===0)return true;
  const captured=cell?.captured_at;
  return typeof captured==='number' && Number.isFinite(captured) && captured>0 &&
@@ -252,7 +286,7 @@ function drawBoard(){
  const bounds=map.getBounds();
  const now=Date.now()/1000;
  const eligible=board.filter(c=>captureVisible(c,now));
- $('capture-filter-status').textContent=`${eligible.length.toLocaleString()} of ${board.length.toLocaleString()} squares match the capture filters across all teams.${captureDays>0?' Missing or future capture times are hidden.':''}`;
+ $('capture-filter-status').textContent=`${capturedSquaresHidden?'Captured squares hidden. ':''}${eligible.length.toLocaleString()} of ${board.length.toLocaleString()} squares match the display filters for ${mapTeamFilter||'all teams'}.${captureDays>0?' Missing or future capture times are hidden.':''}`;
  const visible=eligible.filter(c=>bounds.intersects([[c.south,c.west],[c.north,c.east]]));
  if(targets && result?.routes?.[routeIndex])drawRouteTargets(result.routes[routeIndex]);
  if(visible.length>2500){return;}
@@ -268,6 +302,53 @@ function drawBoard(){
  if(targets)targets.eachLayer(layer=>layer.bringToFront?.());
  if(routeLayer)routeLayer.eachLayer(layer=>layer.bringToFront?.());
 }
+async function refreshRadioCoverage(){
+ try{
+  const response=await fetch('/api/radio-coverage',{cache:'no-store'});
+  if(!response.ok)throw Error('Coverage source unavailable.');
+  radioSnapshot=await response.json();
+  drawRadioCoverage();
+  // Read local startup progress only; upstream polling remains every 30 minutes.
+  if(radioSnapshot.configured && !radioSnapshot.available && !radioSnapshot.error && radioStartupChecks++<20)setTimeout(refreshRadioCoverage,3000);
+ }catch{
+  $('radio-coverage-status').textContent='Coverage refresh unavailable. Previously loaded observations, if any, remain visible.';
+ }
+}
+function drawRadioCoverage(){
+ if(!radioLayer||!radioSnapshot)return;
+ radioLayer.clearLayers();
+ const meta=radioSnapshot,events=meta.events||[];
+ const status=$('radio-coverage-status'),toggle=$('show-radio-coverage');
+ toggle.disabled=!meta.configured||!meta.available||events.length===0;
+ if(!meta.configured){
+  toggle.checked=false;
+  status.textContent='Observations unavailable: a FreqMapper partner connection has not been configured on this server. The public map does not automatically supply this layer. Route coverage remains unknown.';
+  return;
+ }
+ if(!meta.available && !meta.error){status.textContent='Loading the first coverage observations…';return;}
+ const checked=meta.last_success?new Date(meta.last_success*1000).toLocaleString():'not yet';
+ status.textContent=`${events.length.toLocaleString()} observations · Last checked: ${checked}. ${meta.stale?'Using incomplete or previously loaded evidence. ':''}${meta.history_pending?'History import is still in progress. ':''}${meta.error?`${meta.error} `:''}Failed-test evidence is not supplied by this feed.`;
+ if(!$('show-radio-coverage').checked)return;
+ const bounds=map.getBounds();
+ const visible=events.filter(e=>bounds.contains([e.latitude,e.longitude]));
+ if(visible.length>2000){status.textContent+=' Zoom in to display observations (more than 2,000 visible).';return;}
+ for(const event of visible){
+  const tx=event.event_type==='verified_tx';
+  L.circleMarker([event.latitude,event.longitude],{radius:tx?5:4,color:tx?'#13865d':'#a366d6',weight:2,fillOpacity:tx ? .65 : 0})
+   .addTo(radioLayer).bindTooltip(`${tx?'Verified mapping TX':'Passive RX only'}${event.quality?` · ${escape(event.quality)}`:''} · ${escape(new Date(event.occurred_at).toLocaleString())}`);
+ }
+}
+function routeCoverageText(route){
+ const evidence=route.radio_coverage?.targets;
+ if(!evidence)return 'Radio coverage unknown';
+ return `${evidence.verified_tx} targets near verified TX · ${evidence.passive_rx_only} near RX only · ${evidence.unknown} unknown`;
+}
+function routeCoverageDetails(route){
+ const meta=result.radio_coverage||{},evidence=route.radio_coverage;
+ const state=!meta.configured?'Coverage source not connected.':!meta.available?'Coverage evidence has not loaded.':meta.stale?'Previously loaded evidence; the latest refresh failed.':'Partial historical observations from FreqMapper.';
+ return `<section class="route-radio-evidence"><h3>Radio evidence along this drive</h3><p>${escape(routeCoverageText(route))}</p><p class="fine">${escape(state)} ${evidence?`${evidence.verified_tx} crossed squares have nearby verified TX observations; ${evidence.passive_rx_only} have RX only; ${evidence.unknown} have no matching observations. `:''}Counts use the evidence available when this search started and require an observation in the same square and within 50 metres of the planned road. They describe evidence, not capture probability. Failed tests are unavailable; missing evidence stays unknown. Route ranking is unchanged.</p></section>`;
+}
+$('show-radio-coverage').onchange=drawRadioCoverage;
 function instruction(step){
  const m=step.maneuver, road=step.name ? ` onto ${step.name}` : '';
  if(m.type==='depart')return `Start${step.name ? ` on ${step.name}` : ' driving'}`;
@@ -304,7 +385,51 @@ function setPlanVisibility(visible){
  workspace.dispatchEvent(new Event('routepanelchange'));
  if(map)map.invalidateSize({pan:false});
 }
+function markPlaceUsed(place){
+ if(searching)return;
+ if(excludedPlaceIds.has(place.id))excludedPlaceIds.delete(place.id);
+ else{
+  if(excludedPlaceIds.size>=500){$('place-settings-status').textContent='At most 500 places can be marked visited for one search.';return;}
+  excludedPlaceIds.add(place.id);
+ }
+ document.querySelectorAll('[data-used-place]').forEach(button=>button.textContent=excludedPlaceIds.has(Number(button.dataset.usedPlace))?'Marked visited (undo)':'Already visited this week');
+ $('place-settings-status').textContent=`${excludedPlaceIds.size} places marked already visited this week. Run a new search to update bonus estimates.`;
+ drawBonusPlaces();
+}
+function drawBonusPlaces(){
+ if(!bonusPlacesLayer)return;
+ bonusPlacesLayer.clearLayers();
+ for(const place of result?.places?.places||[]){
+  const excluded=excludedPlaceIds.has(place.id),type=place.type;
+  const content=document.createElement('div');
+  const title=document.createElement('strong');title.textContent=place.name;
+  const note=document.createElement('p');note.textContent=`${type} · ${place.points} potential points. ${type==='summit'?'Peak cell only; surrounding elevation eligibility unavailable.':type==='park'?'Park scoring area is conservatively estimated; no access or coverage is guaranteed.':'Point square plus eight adjacent squares.'}`;
+  const button=document.createElement('button');button.type='button';button.textContent=excluded?'Mark as not yet visited':'Already visited this week';button.disabled=searching;button.onclick=()=>markPlaceUsed(place);
+  content.append(title,note,button);
+  L.marker([place.lat,place.lon],{title:`${place.name}: ${place.points} potential place points`,
+   icon:L.divIcon({className:`bonus-place-icon${excluded?' used':''}`,html:`<span>${type==='summit'?'▲':type==='park'?'♣':'★'}</span>`,iconSize:[24,24],iconAnchor:[12,12]})})
+   .addTo(bonusPlacesLayer).bindPopup(content);
+ }
+}
+function routeValueDetails(route){
+ const b=route.territory_breakdown,weight=result.places?.weight??1;
+ const bonus=route.place_bonus||0,territory=route.territory_value??(route.capture_value-bonus*weight);
+ const rows=b?[
+  ['Easy enemy squares',route.easy_enemy_count,b.easy_enemy,'1 each; owner score at most 1'],
+  ['Defended enemy squares',route.hard_enemy_count,b.defended_enemy,'1 ÷ owner score² per square'],
+  ['Enemy squares with unknown score',route.unknown_score_count,b.unknown_enemy,'0.5 each'],
+  ['Unpainted exploration squares',route.unmapped_count,b.unpainted,'1 each; coverage unknown'],
+ ].map(([name,count,value,rule])=>`<tr><th scope="row">${name} (${count})<small>${rule}</small></th><td>${utility(value)}</td></tr>`).join(''):'';
+ return `<section class="route-value"><h3>Why this route ranks here</h3><p><strong>${utility(territory)} territory priority + ${utility(bonus)} estimated place points × ${utility(weight)} weight = ${utility(route.capture_value)} priority value</strong></p>${rows?`<table><caption>Territory priority breakdown</caption><thead><tr><th>Opportunity</th><th>Priority</th></tr></thead><tbody>${rows}</tbody></table>`:''}<p class="fine">Each square counts once per route. Your team's squares add no territory priority; eligible place bonuses can still apply. Owner score measures defense and is not the square's game-point reward. Priority is a ranking aid, not expected game points or guaranteed captures.</p><p class="fine">Places are counted once per place and capped at your entered weekly points remaining. Already-visited places are excluded. Coverage gaps can prevent capture; successful mesh reports are still required.${route.place_bonus_uncapped>bonus?` Before the weekly cap: ${utility(route.place_bonus_uncapped)} estimated place points.`:''}</p></section>`;
+}
+function placeBonusDetails(route){
+ if(!result.places?.enabled)return '';
+ const meta=result.places;
+ const status=!meta.available?'Place feed unavailable; territory-only ranking.':`${meta.stale?'Cached this-week places. ':''}${meta.truncated||meta.eligibility_partial?'Source eligibility is incomplete. ':''}Estimated bonuses assume eligible, unvisited places and successful mesh reports. Park perimeter estimates may differ from game scoring; summit neighbors require elevation data we do not have.`;
+ return `<section class="route-place-bonus"><h3>Estimated place bonuses</h3><p>${utility(route.place_bonus)} points · ${route.place_count||0} potential places · ${meta.remaining} weekly points remaining</p><p class="fine">${escape(status)} One place per square; revisits count once. Estimates are capped by your remaining weekly budget.</p><ul>${(route.bonus_places||[]).map(place=>`<li>${escape(place.name)} · ${escape(place.type)} · ${place.points} points <button type="button" data-used-place="${place.id}">${excludedPlaceIds.has(place.id)?'Marked visited (undo)':'Already visited this week'}</button></li>`).join('')}</ul></section>`;
+}
 function showActiveResult(){
+ drawBonusPlaces();
  const hasRoutes=result.routes.length>0 || Object.values(result.strategy_results||{}).some(entry=>entry.routes.length>0);
  setPlanVisibility(hasRoutes);
  if(result.no_opportunities){
@@ -330,20 +455,29 @@ function showRoute(index){
  targets.clearLayers();
  drawRouteTargets(r);
  L.geoJSON(base.geometry,{style:{color:'#8494aa',weight:5,opacity:.55}}).addTo(routeLayer);
- const line=L.geoJSON(r.geometry,{style:{color:colors[result.team],weight:5,opacity:.95}}).addTo(routeLayer);
+ L.geoJSON(r.geometry,{style:{color:'#172238',weight:10,opacity:.95,lineCap:'round',lineJoin:'round'}}).addTo(routeLayer);
+ const line=L.geoJSON(r.geometry,{style:{color:routeColor(result.team),weight:6,opacity:1,lineCap:'round',lineJoin:'round'}}).addTo(routeLayer);
  map.fitBounds(line.getBounds(),{padding:[25,25]});
- const cards=result.routes.map((v,i)=>`<button class="card ${i===index?'selected':''}" data-route="${i}" aria-pressed="${i===index}">${i===0?`Best ${result.team} opportunity`:`Alternative ${i+1}`}<b>${utility(v.capture_value)} priority value</b><small>${v.target_count} raw targets · ${v.easy_enemy_count} easy enemy<br>${v.hard_enemy_count} defended · ${v.unknown_score_count} unknown score · ${v.unmapped_count} unpainted<br>${minutes(v.duration)} · ${miles(v.distance)}<br>+${minutes(Math.max(0,v.duration-base.duration))} vs fastest</small></button>`).join('');
+ const cards=result.routes.map((v,i)=>`<button class="card ${i===index?'selected':''}" data-route="${i}" aria-pressed="${i===index}">${i===0?`Best ${result.team} opportunity`:`Alternative ${i+1}`}<b>${utility(v.capture_value)} priority value</b><small>${v.target_count} raw targets · ${v.easy_enemy_count} easy enemy<br>${v.hard_enemy_count} defended · ${v.unknown_score_count} unknown score · ${v.unmapped_count} unpainted<br>${minutes(v.duration)} · ${miles(v.distance)}<br>+${minutes(Math.max(0,v.duration-base.duration))} vs fastest<br>${escape(routeCoverageText(v))}${v.place_bonus?`<br>+${utility(v.place_bonus)} estimated place points · ${v.place_count} places`:""}</small></button>`).join('');
  const steps=[];
  r.legs.forEach((leg,legIndex)=>leg.steps.forEach(step=>{
   let text=instruction(step);
   if(step.maneuver.type==='arrive')text=legIndex===r.legs.length-1?'Arrive at destination B':`Reach ${r.stop_labels?.[legIndex]||'exploration detour'}; continue to the next leg`;
   steps.push(`<li><span>${escape(text)}</span><small>${miles(step.distance)}</small></li>`);
  }));
- $('results').innerHTML=`<div class="cards">${cards}</div><div class="routehead"><h2>Your driving directions</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-modal" aria-haspopup="dialog">Navigate / send to phone</button><button id="download">GeoJSON</button></div></div><p class="trip">A: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → B: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p><ol class="steps">${steps.join('')}</ol>`;
+ $('results').innerHTML=`<div class="cards">${cards}</div><div class="routehead"><h2>Your driving directions</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-modal" aria-haspopup="dialog">Navigate / send to phone</button><button id="download">GeoJSON</button><button id="clear-displayed-route" type="button">Clear route</button></div></div><p class="trip">A: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → B: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value${r.place_bonus?`<br>${utility(r.territory_value)} territory priority + ${utility(r.place_bonus)} estimated place points × ${result.places?.weight??1}`:''}<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p>${routeValueDetails(r)}${routeCoverageDetails(r)}${placeBonusDetails(r)}<ol class="steps">${steps.join('')}</ol>`;
  document.querySelectorAll('[data-route]').forEach(el=>el.onclick=()=>showRoute(Number(el.dataset.route)));
+ document.querySelectorAll('[data-used-place]').forEach(button=>button.onclick=()=>{
+  const place=r.bonus_places.find(place=>place.id===Number(button.dataset.usedPlace));
+  markPlaceUsed(place);
+ });
+ $('clear-displayed-route').onclick=()=>{
+  if(searching)return;
+  clearDisplayedRoute();$('status').textContent='Route cleared. Your trip inputs and area are ready for another search.';
+ };
  $('phone-navigation').onclick=()=>openNavigation(r);
  $('download').onclick=()=>{
-  const blob=new Blob([JSON.stringify({type:'Feature',geometry:r.geometry,properties:{team:result.team,duration_seconds:r.duration,target_count:r.target_count,capture_value:r.capture_value,easy_enemy_count:r.easy_enemy_count,hard_enemy_count:r.hard_enemy_count,required_waypoints:result.required_waypoints}},null,2)],{type:'application/geo+json'});
+  const blob=new Blob([JSON.stringify({type:'Feature',geometry:r.geometry,properties:{team:result.team,place_bonus:r.place_bonus,bonus_places:r.bonus_places,territory_value:r.territory_value,allowed_bounds:result.allowed_bounds,radio_coverage:r.radio_coverage,duration_seconds:r.duration,target_count:r.target_count,capture_value:r.capture_value,easy_enemy_count:r.easy_enemy_count,hard_enemy_count:r.hard_enemy_count,required_waypoints:result.required_waypoints}},null,2)],{type:'application/geo+json'});
   const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`${result.team.toLowerCase()}-route.geojson`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
  };
 }
@@ -351,20 +485,70 @@ function saveFile(blob,name){
  const url=URL.createObjectURL(blob),link=document.createElement('a');
  link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
-function drawQr(container,url){
+function drawQr(container,url,label='Scan with your phone camera to open this Google Maps section'){
  if(typeof window.qrcode!=='function'){container.textContent='QR library unavailable. Copy the link instead.';return;}
  try{
   const code=window.qrcode(0,'M');code.addData(url);code.make();
   const count=code.getModuleCount(),scale=6,quiet=4,canvas=document.createElement('canvas');
   canvas.width=canvas.height=(count+quiet*2)*scale;
-  canvas.setAttribute('role','img');canvas.setAttribute('aria-label','Scan with your phone camera to open this Google Maps section');
+  canvas.setAttribute('role','img');canvas.setAttribute('aria-label',label);
   const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#000';
   for(let row=0;row<count;row++)for(let col=0;col<count;col++)if(code.isDark(row,col))ctx.fillRect((col+quiet)*scale,(row+quiet)*scale,scale,scale);
   container.replaceChildren(canvas);
  }catch{container.textContent='Could not generate QR. Copy the link instead.';}
 }
+function drawHandoffPreview(container,data,route,team,area){
+ const preview=data.preview;
+ const previewMap=L.map(container.querySelector('.handoff-preview-map'),{scrollWheelZoom:false});
+ try{
+ // Establish renderer bounds before adding the area and any vector layers.
+ const path=L.geoJSON(route.geometry,{style:{color:routeColor(team),weight:6,opacity:1}});
+ previewMap.fitBounds(path.getBounds(),{padding:[30,30],maxZoom:16,animate:false});
+ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(previewMap);
+ L.geoJSON(route.geometry,{style:{color:'#172238',weight:10,opacity:.95}}).addTo(previewMap);
+ path.addTo(previewMap);
+ if(area){
+  if(area.type==='Polygon')L.geoJSON(area,{style:{color:'#f59e0b',weight:1,dashArray:'6 5',fillOpacity:0}}).addTo(previewMap);
+  else L.rectangle([[area.south,area.west],[area.north,area.east]],{color:'#f59e0b',weight:1,dashArray:'6 5',fillOpacity:0,interactive:false}).addTo(previewMap);
+ }
+ const gaps=preview.legs.map(leg=>L.geoJSON(leg.geometry,{style:{color:leg.long_gap?'#e69524':routeColor(team),weight:leg.long_gap?6:4,opacity:.9,dashArray:leg.long_gap?'9 7':null}}).addTo(previewMap));
+ const stops=[],labels=[];
+ for(const [index,section] of data.sections.entries()){
+  stops.push(...section.stops.slice(index?1:0));
+  labels.push(...section.labels.slice(index?1:0));
+ }
+ stops.forEach((point,index)=>{
+  const label=document.createElement('span');label.textContent=`${index+1}. ${labels[index]}`;
+  L.marker([point[1],point[0]],{title:`Export stop ${index+1}: ${labels[index]}`,alt:`Export stop ${index+1}`,icon:L.divIcon({className:'handoff-stop-icon',html:`<span style="background:${colors[team]}">${index+1}</span>`,iconSize:[28,28],iconAnchor:[14,14]})})
+   .addTo(previewMap).bindTooltip(label,{direction:'top'});
+ });
+ const list=container.querySelector('.handoff-gap-list');
+ preview.legs.forEach((leg,index)=>{
+  const item=document.createElement('li'),button=document.createElement('button');
+  button.type='button';button.className=leg.long_gap?'handoff-gap long-gap':'handoff-gap';
+  button.textContent=`${leg.from_stop} → ${leg.to_stop}: ${miles(leg.distance_meters)}${leg.long_gap?' · Long gap':''}`;
+  button.setAttribute('aria-label',`${button.textContent}. Zoom to this part of the planned route.`);
+  button.onclick=()=>{
+   gaps.forEach((layer,i)=>layer.setStyle({weight:i===index?8:4,opacity:i===index?1:.55}));
+   list.querySelectorAll('button').forEach(el=>el.setAttribute('aria-pressed',String(el===button)));
+   previewMap.fitBounds(gaps[index].getBounds(),{padding:[30,30],maxZoom:17,animate:false});
+  };
+  button.setAttribute('aria-pressed','false');item.append(button);list.append(item);
+ });
+ const fit=()=>{
+  gaps.forEach((layer,i)=>layer.setStyle({weight:preview.legs[i].long_gap?6:4,opacity:.9}));
+  list.querySelectorAll('button').forEach(el=>el.setAttribute('aria-pressed','false'));
+  previewMap.invalidateSize({pan:false});
+  previewMap.fitBounds(path.getBounds(),{padding:[30,30],maxZoom:16,animate:false});
+ };
+ container.querySelector('.handoff-fit-route').onclick=fit;
+ fit();
+ return {map:previewMap,fit};
+ }catch(error){previewMap.remove();throw error;}
+}
 async function openNavigation(route){
- const button=$('phone-navigation'),team=result.team;
+ const button=$('phone-navigation'),team=result.team,routeArea=result.allowed_bounds;
+ let handoffPreview=null;
  if($('navigation-modal'))return;
  const modal=document.createElement('dialog');
  modal.id='navigation-modal';modal.setAttribute('aria-labelledby','navigation-modal-title');
@@ -378,7 +562,7 @@ async function openNavigation(route){
   if(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)modal.close();
  });
  modal.addEventListener('close',()=>{
-  controller.abort();modal.remove();document.body.classList.remove('navigation-modal-open');
+  controller.abort();handoffPreview?.map.remove();modal.remove();document.body.classList.remove('navigation-modal-open');
   if(button.isConnected){button.disabled=false;button.setAttribute('aria-expanded','false');button.focus();}
  },{once:true});
  modal.showModal();document.body.classList.add('navigation-modal-open');
@@ -389,7 +573,19 @@ async function openNavigation(route){
   const data=await response.json();if(!response.ok)throw Error(data.error||'Export failed.');
   // A route switch may have removed this panel while export was being prepared.
   if(!panel.isConnected)return;
-  panel.innerHTML=`<p>Scan a QR code with your phone camera to open Google Maps. No email or access to this local app is needed. For longer routes, copy/share all section links to your phone before leaving, then finish each section and open the next one.</p><div id="navigation-sections"></div><p class="handoff-note">Google Maps recalculates roads between the stops and may skip capture streets. Check its preview before starting. GPX preserves the complete planned track for a compatible track-following app; it does not contain spoken instructions.</p><div class="route-actions"><button id="navigation-copy-all">Copy all navigation links</button><button id="navigation-share-all" hidden>Share all links</button></div><div class="route-actions handoff-file-actions"><button id="gpx-download">Download GPX track</button><button id="gpx-share" hidden>Share GPX file</button></div><p class="fine">Transfer the GPX file using AirDrop, Quick Share, your files/cloud app, or email. Import it in a navigation app that supports following GPX tracks. ${data.trackpoint_count.toLocaleString()} track points retained.</p><p id="handoff-status" role="status" aria-live="polite"></p>`;
+  panel.innerHTML=`<div class="handoff-tabs" role="group" aria-label="Phone handoff view"><button id="handoff-show-preview" type="button" aria-pressed="true" aria-controls="handoff-preview-pane">Route preview</button><button id="handoff-show-qr" type="button" aria-pressed="false" aria-controls="handoff-qr-pane">QR &amp; sharing</button></div><section id="handoff-preview-pane"><h3>Planned route &amp; exported stops</h3><p>${data.preview.intermediate_stop_count} intermediate stops · ${data.sections.length} QR ${data.sections.length===1?'code':'codes'} · up to ${data.preview.waypoint_limit} intermediate stops per app link.</p><div class="handoff-preview-map" aria-label="Planned route with numbered Google Maps export stops"></div><div class="handoff-preview-key"><span>Solid: planned route</span><span>Amber dashes: gaps over 2 km</span><button class="handoff-fit-route" type="button">Fit whole route</button></div><p class="fine">Numbered pins are the coordinates sent to Google Maps, in order. Select a gap below to inspect it. Amber marks longer distances between stops, where Google has more room to choose different roads; shorter gaps can change too. This shows our planned geometry, not a route returned by Google. Stops may snap to nearby streets.</p><ol class="handoff-gap-list" aria-label="Distances between exported stops"></ol></section><div id="handoff-qr-pane" hidden><p>${data.sections.length===1?'Scan this QR code to open the complete drive in the Google Maps app on Android or iPhone.':'This drive exceeds nine intermediate stops, so it uses multiple Google Maps app links. Scan or copy/share all section links before leaving, then open them in order.'} No email or access to this local app is needed. If the link opens in a mobile browser, open it in the Google Maps app to retain all stops.</p><div id="navigation-sections"></div><p class="handoff-note">Google Maps recalculates roads between the stops and may skip capture streets. ${result.allowed_bounds?'It can also recalculate outside your drawn route area. ':''}Check its preview before starting. GPX preserves the complete planned track for a compatible track-following app; it does not contain spoken instructions.</p><div class="route-actions"><button id="navigation-copy-all">Copy all navigation links</button><button id="navigation-share-all" hidden>Share all links</button></div><div class="route-actions handoff-file-actions"><button id="gpx-download">Download GPX track</button><button id="gpx-share" hidden>Share GPX file</button></div><p class="fine">Transfer the GPX file using AirDrop, Quick Share, your files/cloud app, or email. Import it in a navigation app that supports following GPX tracks. ${data.trackpoint_count.toLocaleString()} track points retained.</p><section class="gpx-qr-card"><h3>GPX for OsmAnd</h3><p>Scan a download link on your phone, then use Share → OsmAnd to import the full track. Your phone must be able to reach this site; this is a file download, not one-tap navigation.</p><button id="gpx-create-qr" type="button">Create GPX download QR</button><p id="gpx-qr-status" class="fine" role="status" aria-live="polite"></p><div id="gpx-qr-result" hidden><div class="navigation-qr gpx-download-qr"></div><div class="route-actions"><a id="gpx-qr-open" class="navigation-open" target="_blank" rel="noopener noreferrer">Download GPX</a><button id="gpx-qr-copy" type="button">Copy GPX link</button><button id="gpx-qr-share" type="button" hidden>Share GPX link</button></div><input id="gpx-qr-url" class="navigation-url" readonly aria-label="Temporary GPX download link"></div></section><p id="handoff-status" role="status" aria-live="polite"></p></div>`;
+  try{handoffPreview=drawHandoffPreview(panel.querySelector('#handoff-preview-pane'),data,route,team,routeArea);}
+  catch{panel.querySelector('#handoff-preview-pane').textContent='The map preview could not load. Your QR codes, links, and GPX export remain available under QR & sharing.';}
+  const showHandoffPane=showPreview=>{
+   panel.querySelector('#handoff-preview-pane').hidden=!showPreview;
+   panel.querySelector('#handoff-qr-pane').hidden=showPreview;
+   panel.querySelector('#handoff-show-preview').setAttribute('aria-pressed',String(showPreview));
+   panel.querySelector('#handoff-show-qr').setAttribute('aria-pressed',String(!showPreview));
+   if(showPreview)handoffPreview?.map.invalidateSize({pan:false});
+  };
+  panel.querySelector('#handoff-show-preview').onclick=()=>showHandoffPane(true);
+  panel.querySelector('#handoff-show-qr').onclick=()=>showHandoffPane(false);
+  if(!handoffPreview)showHandoffPane(false);
   const allLinks=data.sections.map((section,index)=>`Section ${index+1}/${data.sections.length}: ${section.from_label} → ${section.to_label}\n${section.url}`).join('\n\n');
   const allLinksText=`MeshWars ${team} drive — Google may recalculate roads. Open sections in order.\n\n${allLinks}`;
   panel.querySelector('#navigation-copy-all').onclick=async()=>{
@@ -402,6 +598,39 @@ async function openNavigation(route){
   };}
   const file=new File([data.gpx],`${team.toLowerCase()}-route.gpx`,{type:'application/gpx+xml'});
   panel.querySelector('#gpx-download').onclick=()=>saveFile(file,`${team.toLowerCase()}-route.gpx`);
+  const gpxQRButton=panel.querySelector('#gpx-create-qr'),gpxQRStatus=panel.querySelector('#gpx-qr-status');
+  const loopbackHost=/^(localhost|127(?:\.\d+){3}|\[?::1\]?|0\.0\.0\.0)$/.test(location.hostname)||location.hostname.endsWith('.localhost');
+  if(loopbackHost)gpxQRStatus.textContent='Localhost link: a phone cannot reach this address. You can preview the QR now; use it after opening the planner at a phone-accessible address.';
+  gpxQRButton.onclick=async()=>{
+   gpxQRButton.disabled=true;
+   const previousStatus=gpxQRStatus.textContent;
+   gpxQRStatus.textContent='Creating a temporary download link…';
+   try{
+    const response=await fetch('/api/gpx-shares',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({route:{team,geometry:route.geometry,via_points:route.via_points||[],stop_labels:route.stop_labels||[]}})});
+    const share=await response.json();if(!response.ok)throw Error(share.error||'Could not create a GPX link.');
+    if(!panel.isConnected)return;
+    const url=new URL(share.download_path,location.origin).href;
+    const holder=panel.querySelector('#gpx-qr-result'),input=panel.querySelector('#gpx-qr-url');
+    holder.hidden=false;input.value=url;input.onclick=()=>input.select();
+    panel.querySelector('#gpx-qr-open').href=url;
+    drawQr(holder.querySelector('.gpx-download-qr'),url,'Scan with your phone camera to download this GPX track for import into OsmAnd');
+    const expiry=new Date(share.expires_at*1000).toLocaleTimeString();
+    gpxQRStatus.textContent=`Link expires at ${expiry} (1 hour), or when the server restarts. Anyone with the link can download this track. ${loopbackHost?'This localhost URL is not reachable from your phone.':'Your phone must be able to reach this site; any site login still applies.'}`;
+    gpxQRButton.textContent='Create a new GPX link';
+    panel.querySelector('#gpx-qr-copy').onclick=async()=>{
+     try{await navigator.clipboard.writeText(url);panel.querySelector('#handoff-status').textContent='GPX download link copied.';}
+     catch{input.focus();input.select();panel.querySelector('#handoff-status').textContent='GPX link selected. Copy it using your browser menu.';}
+    };
+    const shareButton=panel.querySelector('#gpx-qr-share');
+    if(navigator.share){shareButton.hidden=false;shareButton.onclick=async()=>{
+     try{await navigator.share({title:`${team} GPX track for OsmAnd`,url});}
+     catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='Sharing unavailable. Copy the GPX link or scan its QR.';}
+    };}
+   }catch(error){
+    if(error.name==='AbortError')gpxQRStatus.textContent=previousStatus;
+    else gpxQRStatus.textContent=error.message;
+   }finally{if(gpxQRButton.isConnected)gpxQRButton.disabled=false;}
+  };
   const shareFile=panel.querySelector('#gpx-share');
   if(navigator.share && navigator.canShare?.({files:[file]})){
    shareFile.hidden=false;
@@ -409,7 +638,7 @@ async function openNavigation(route){
   }
   for(const [index,section] of data.sections.entries()){
    const card=document.createElement('section');card.className='navigation-section';
-   card.innerHTML=`<h4>Section ${index+1} of ${data.sections.length}: ${escape(section.from_label)} → ${escape(section.to_label)}</h4><p class="fine">${section.labels.map(escape).join(' → ')}</p><div class="navigation-qr"></div><div class="route-actions"><a class="navigation-open" target="_blank" rel="noopener noreferrer">Open Google Maps</a><button class="navigation-copy">Copy link</button><button class="navigation-share" hidden>Share link</button></div><input class="navigation-url" readonly aria-label="Google Maps section ${index+1} link">`;
+   card.innerHTML=`<h4>${data.sections.length===1?'Complete drive':`Section ${index+1} of ${data.sections.length}` }: ${escape(section.from_label)} → ${escape(section.to_label)}</h4><p class="fine">${section.labels.map(escape).join(' → ')}</p><div class="navigation-qr"></div><div class="route-actions"><a class="navigation-open" target="_blank" rel="noopener noreferrer">Open Google Maps</a><button class="navigation-copy">Copy link</button><button class="navigation-share" hidden>Share link</button></div><input class="navigation-url" readonly aria-label="Google Maps section ${index+1} link">`;
    const input=card.querySelector('input');input.value=section.url;input.onclick=()=>input.select();
    card.querySelector('a').href=section.url;
    drawQr(card.querySelector('.navigation-qr'),section.url);
@@ -483,7 +712,32 @@ function initPanelResize(){
  window.addEventListener('afterprint',resize);
  resize();
 }
+function setTeamMapFilter(team){
+ mapTeamFilter=mapTeamFilter===team?null:team;
+ renderTeamScores();drawBoard();
+ $('team-score-list').querySelector(`[data-team="${team}"] button`)?.focus();
+}
+$('team-filter-clear').onclick=()=>{mapTeamFilter=null;renderTeamScores();drawBoard();};
+function renderTeamScores(){
+ const counts=Object.fromEntries(Object.keys(colors).map(team=>[team,0]));
+ for(const cell of board){if(Object.hasOwn(counts,cell.owner_team))counts[cell.owner_team]++;}
+ const scores=feedMetadata?.team_scores;
+ const liveScores=scores?.available?new Map(scores.teams.map(row=>[row.team,row])):null;
+ const entries=Object.keys(colors).map(team=>({team,score:liveScores?.get(team)?.total,
+  count:liveScores?.get(team)?.tiles??(boardAvailable?counts[team]:null),details:liveScores?.get(team)}));
+ entries.sort((a,b)=>(b.score??b.count??-1)-(a.score??a.count??-1)||Object.keys(colors).indexOf(a.team)-Object.keys(colors).indexOf(b.team));
+ $('team-score-list').innerHTML=entries.map(({team,score,count,details})=>`<li class="team-score ${team===selectedTeam()?'selected':''} ${mapTeamFilter===team?'filtered':''} ${mapTeamFilter&&mapTeamFilter!==team?'muted':''}" data-team="${team}" style="--score-team-color:${colors[team]}"><button class="team-score-filter" type="button" aria-pressed="${mapTeamFilter===team}" aria-label="${team}: ${score===undefined?'points unavailable':`${score} points`}, ${count===null?'territory unavailable':`${count} squares held`}. Filter map to ${team}${team===selectedTeam()?', your planning team':''}" title="${details?`${details.tiles.toLocaleString()} squares + ${details.checkin_points.toLocaleString()} check-in + ${details.explorer_points.toLocaleString()} exploration points. `:'Total points unavailable. '}Click to show only ${team}; click again to show all teams."><span class="team-score-name"><i aria-hidden="true"></i>${team}${team===selectedTeam()?' · you':''}</span><strong>${score===undefined?'—':Number(score).toLocaleString(undefined,{maximumFractionDigits:2})}<span class="team-score-unit"> points</span></strong><span class="team-score-captures">${count===null?'—':Number(count).toLocaleString()} ${count===1?'square':'squares'} held</span></button></li>`).join('');
+ $('team-score-list').querySelectorAll('button').forEach(button=>button.onclick=()=>setTeamMapFilter(button.closest('[data-team]').dataset.team));
+ $('team-filter-clear').hidden=!mapTeamFilter;
+ const source=$('team-scores-source');
+ const stale=feedMetadata?.stale||scores?.stale;
+ source.textContent=liveScores?`${stale?'Cached · ':''}Total points + squares held${mapTeamFilter?` · Showing ${mapTeamFilter}`:''}`:
+  `${boardAvailable&&stale?'Cached · ':''}${boardAvailable?'Points unavailable · board counts only':'Waiting for board data…'}${mapTeamFilter?` · Showing ${mapTeamFilter}`:''}`;
+ source.title=liveScores?`Meshtastic scoreboard: squares held plus check-in and exploration points. Checked ${scores.last_success?new Date(scores.last_success*1000).toLocaleString():'at an unknown time'}. Map filters do not change totals. Squares held are current territory, not all-time capture events.`:
+  'The scoreboard feed has not loaded. Points remain unknown; territory counts use the loaded board. Map filters do not change totals.';
+}
 function renderFeedStatus(){
+ renderTeamScores();
  if(!feedMetadata)return;
  const meta=feedMetadata;
  const stamp=value=>value?new Date(value*1000).toLocaleString():'not yet';
@@ -505,6 +759,8 @@ async function refreshBoard(full=false){
    data=await response.json();
   }
   feedMetadata=data;
+  // Poll only the local startup state; upstream remains on its 30-minute schedule.
+  if(!data.available && boardStartupChecks++<20)setTimeout(()=>refreshBoard(true),3000);
   if(data.available && Array.isArray(data.coverage)){
    board=data.coverage;boardRevision=data.revision;boardAvailable=true;
    drawBoard();
@@ -526,6 +782,98 @@ $('refresh-board').onclick=async()=>{
  }catch(error){$('board-feed-status').textContent=error.message;}
  finally{setTimeout(()=>{$('refresh-board').disabled=false;},15000);}
 };
+function cancelAreaDrawing(){
+ areaDrawing=null;
+ if(areaPreview){map.removeLayer(areaPreview);areaPreview=null;}
+ $('draw-route-polygon').setAttribute('aria-pressed','false');
+ $('draw-route-polygon').textContent='Draw freeform area';
+ $('finish-route-polygon').disabled=true;$('undo-route-polygon').disabled=true;
+ $('draw-route-area').setAttribute('aria-pressed','false');
+ $('draw-route-area').textContent='Draw box on map';
+ $('map').classList.remove('drawing-route-area');
+}
+function finishRouteAreaChange(){
+ updateTeam();
+ $('clear-route-area').disabled=!allowedBounds;
+ $('route-area-status').textContent=allowedBounds?'Area set. All route geometry must stay inside the amber outline. Draw again to replace it, or clear the limit.':'No area limit. Draw a box or freeform area to constrain the drive.';
+ $('status').textContent='Route area changed. Run a new search to apply it.';
+}
+$('draw-route-area').onclick=()=>{
+ if(areaDrawing?.kind==='box'){cancelAreaDrawing();$('route-area-status').textContent='Drawing cancelled. The previous area, if any, is unchanged.';return;}
+ cancelAreaDrawing();mapPickTarget=null;areaDrawing={kind:'box',corner:null};
+ $('draw-route-area').setAttribute('aria-pressed','true');
+ $('draw-route-area').textContent='Cancel drawing';
+ $('map').classList.add('drawing-route-area');
+ $('route-area-status').textContent='Click or tap one corner on the map, then the opposite corner. Escape cancels.';
+};
+$('draw-route-polygon').onclick=()=>{
+ if(areaDrawing?.kind==='polygon'){cancelAreaDrawing();$('route-area-status').textContent='Drawing cancelled. The previous area is unchanged.';return;}
+ cancelAreaDrawing();mapPickTarget=null;areaDrawing={kind:'polygon',points:[]};
+ $('draw-route-polygon').setAttribute('aria-pressed','true');
+ $('draw-route-polygon').textContent='Cancel drawing';
+ $('map').classList.add('drawing-route-area');
+ $('route-area-status').textContent='Click or tap corners around your coverage area, then right-click or choose Finish shape. At least 3 corners; Escape cancels.';
+};
+function previewPolygon(hover=null){
+ if(areaPreview){map.removeLayer(areaPreview);areaPreview=null;}
+ const points=areaDrawing.points;
+ if(points.length)areaPreview=L.polygon(hover?[...points,hover]:points,{color:'#f59e0b',weight:2,dashArray:'7 5',fillOpacity:.06,interactive:false}).addTo(map);
+ $('finish-route-polygon').disabled=points.length<3||areaDrawing.busy;
+ $('undo-route-polygon').disabled=!points.length||areaDrawing.busy;
+}
+$('undo-route-polygon').onclick=()=>{
+ if(areaDrawing?.kind!=='polygon'||areaDrawing.busy)return;
+ areaDrawing.points.pop();previewPolygon();
+ $('route-area-status').textContent=`${areaDrawing.points.length} corners. Add corners, then right-click or choose Finish shape.`;
+};
+$('finish-route-polygon').onclick=async()=>{
+ if(areaDrawing?.kind!=='polygon'||areaDrawing.points.length<3||areaDrawing.busy)return;
+ const drawing=areaDrawing,ring=drawing.points.map(p=>[p.lng,p.lat]);ring.push([...ring[0]]);
+ drawing.busy=true;previewPolygon();
+ try{
+  const response=await fetch('/api/validate-route-area',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({allowed_bounds:{type:'Polygon',coordinates:[ring]}})});
+  const data=await response.json();if(!response.ok)throw Error(data.error||'Could not validate this shape.');
+  if(areaDrawing!==drawing)return;
+  cancelAreaDrawing();allowedBounds=data.allowed_bounds;
+  if(areaLayer)map.removeLayer(areaLayer);
+  areaLayer=L.polygon(drawing.points,{color:'#f59e0b',weight:2,dashArray:'7 5',fillOpacity:.04,interactive:false}).addTo(map);
+  finishRouteAreaChange();
+ }catch(error){if(areaDrawing===drawing)$('route-area-status').textContent=`${error.message} Undo a corner or redraw the area.`;}
+ finally{if(areaDrawing===drawing){drawing.busy=false;previewPolygon();}}
+};
+$('clear-route-area').onclick=()=>{
+ cancelAreaDrawing();allowedBounds=null;
+ if(areaLayer){map.removeLayer(areaLayer);areaLayer=null;}
+ finishRouteAreaChange();
+};
+function handleAreaClick(latlng){
+ if(!areaDrawing)return false;
+ if(areaDrawing.kind==='polygon'){
+  if(areaDrawing.busy)return true;
+  if(areaDrawing.points.length>=100){$('route-area-status').textContent='Maximum 100 corners. Finish the shape or undo a corner.';return true;}
+  if(areaDrawing.points.some(p=>p.equals(latlng,1e-10))){$('route-area-status').textContent='Right-click or choose Finish shape to close the polygon, or add a different corner.';return true;}
+  areaDrawing.points.push(latlng);previewPolygon();
+  $('route-area-status').textContent=`${areaDrawing.points.length} corners. ${areaDrawing.points.length>=3?'Right-click or choose Finish shape when ready.':'Add at least 3 corners.'}`;
+  return true;
+ }
+ if(!areaDrawing.corner){
+  areaDrawing.corner=latlng;
+  $('route-area-status').textContent='Select the opposite corner. Escape cancels.';
+  return true;
+ }
+ const bounds=L.latLngBounds(areaDrawing.corner,latlng);
+ const box={west:bounds.getWest(),south:bounds.getSouth(),east:bounds.getEast(),north:bounds.getNorth()};
+ if(box.west===box.east||box.south===box.north||box.west< -180||box.east>180||box.south< -90||box.north>90){
+  $('route-area-status').textContent='Choose a different corner to create a non-empty box within the world map.';return true;
+ }
+ cancelAreaDrawing();allowedBounds=box;
+ if(areaLayer)map.removeLayer(areaLayer);
+ areaLayer=L.rectangle(bounds,{color:'#f59e0b',weight:2,dashArray:'7 5',fillOpacity:.04,interactive:false}).addTo(map);
+ finishRouteAreaChange();return true;
+}
+document.addEventListener('keydown',event=>{
+ if(event.key==='Escape'&&areaDrawing){cancelAreaDrawing();$('route-area-status').textContent='Drawing cancelled. The previous area, if any, is unchanged.';}
+});
 function initCurrentLocation(){
  const control=L.control({position:'topleft'});
  let locationLayer=null;
@@ -562,22 +910,91 @@ function initCurrentLocation(){
  };
  control.addTo(map);
 }
+function updateCapturedVisibilityButton(){
+ const button=$('toggle-captured-squares');
+ button.textContent=capturedSquaresHidden?'Show captured squares':'Hide captured squares';
+ button.setAttribute('aria-pressed',String(capturedSquaresHidden));
+}
+$('toggle-captured-squares').onclick=()=>{
+ capturedSquaresHidden=!capturedSquaresHidden;
+ try{localStorage.setItem('hide-captured-squares',String(capturedSquaresHidden));}catch{}
+ updateCapturedVisibilityButton();drawBoard();
+};
+updateCapturedVisibilityButton();
+function clearDisplayedRoute(){
+ clearStopErrors();
+ result=null;tripLabels=null;routeIndex=0;
+ $('search-progress').hidden=true;
+ $('navigation-modal')?.close();
+ routeLayer?.clearLayers();targets?.clearLayers();bonusPlacesLayer?.clearLayers();
+ $('comparison').hidden=true;$('comparison').replaceChildren();
+ $('results').innerHTML=`<div class="empty"><h2>A better route for ${selectedTeam()}.</h2><p>Run a new search using your current start, destination, and route settings.</p></div>`;
+ setPlanVisibility(false);renderFeedStatus();
+}
 function updateTeam(){
  const team=selectedTeam();
  document.querySelectorAll('[data-team-name]').forEach(label=>label.textContent=team);
  document.title=`${team} / MeshWars Route Planner`;
  document.documentElement.style.setProperty('--team-color',colors[team]);
  $('submit').textContent=`Find ${team} opportunities →`;
- result=null;tripLabels=null;
- $('search-progress').hidden=true;
- $('navigation-modal')?.close();
- routeLayer?.clearLayers();targets?.clearLayers();
- $('comparison').hidden=true;
- $('results').innerHTML=`<div class="empty"><h2>A better route for ${team}.</h2><p>Select your start and destination to compare the fastest drive with territory opportunities.</p></div>`;
- setPlanVisibility(false);updateSquareDarkness(true);renderFeedStatus();
+ clearDisplayedRoute();updateSquareDarkness(true);
  if(boardAvailable)$('status').textContent=`Team ${team} selected. Run a new search to plan for this team.`;
 }
 $('team').onchange=updateTeam;
+const savedTripsKey='meshwars-saved-trips-v1';
+let savedTrips=[];
+try{const data=JSON.parse(localStorage.getItem(savedTripsKey)||'[]');if(Array.isArray(data))savedTrips=data.filter(t=>t&&typeof t.id==='string'&&typeof t.name==='string'&&Array.isArray(t.stops)&&t.stops.length>=2&&t.stops.length<=10).slice(0,30);}catch{}
+function renderSavedTrips(selected=''){
+ $('saved-trip').innerHTML='<option value="">Select a saved trip…</option>'+savedTrips.map(t=>`<option value="${escape(t.id)}">${escape(t.name)}</option>`).join('');
+ $('saved-trip').value=selected;
+ $('save-trip').textContent=selected?'Save changes':'Save trip';
+ $('load-trip').disabled=searching||!selected;$('delete-trip').disabled=searching||!selected;
+}
+function persistTrips(next,selected,message){
+ try{localStorage.setItem(savedTripsKey,JSON.stringify(next));savedTrips=next;renderSavedTrips(selected);$('saved-trip-status').textContent=message;}
+ catch{$('saved-trip-status').textContent='Could not save changes. Browser storage may be full or disabled.';}
+}
+$('saved-trip').onchange=()=>{
+ const trip=savedTrips.find(t=>t.id===$('saved-trip').value);
+ $('trip-name').value=trip?.name||'';renderSavedTrips(trip?.id||'');
+};
+$('save-trip').onclick=()=>{
+ if(searching)return;
+ const name=$('trip-name').value.trim();
+ if(!name){$('saved-trip-status').textContent='Enter a name for this trip.';$('trip-name').focus();return;}
+ const ids=['start',...waypointIds(),'end'];
+ if(ids.some(id=>!$(id).value.trim())){$('saved-trip-status').textContent='Enter a start, destination, and each waypoint before saving.';return;}
+ const existing=savedTrips.find(t=>t.id===$('saved-trip').value);
+ if(!existing&&savedTrips.length>=30){$('saved-trip-status').textContent='Up to 30 trips can be saved. Delete a trip to make room.';return;}
+ const trip={id:existing?.id||(globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`),name,team:selectedTeam(),stops:ids.map(id=>({text:$(id).value,selected:selectedLocations[id]||null})),area:allowedBounds,budget:$('budget').value,strategy:$('strategy').value,places:{enabled:$('include-places').checked,weight:$('place-weight').value,remaining:$('place-remaining').value,excluded:[...excludedPlaceIds],week:placeScoringWeek}};
+ persistTrips([...savedTrips.filter(t=>t.id!==trip.id),trip],trip.id,`Saved “${name}” in this browser. Saving again updates this trip.`);
+};
+$('delete-trip').onclick=()=>{
+ if(searching)return;
+ persistTrips(savedTrips.filter(t=>t.id!==$('saved-trip').value),'','Trip deleted.');$('trip-name').value='';
+};
+$('load-trip').onclick=()=>{
+ if(searching)return;
+ const trip=savedTrips.find(t=>t.id===$('saved-trip').value);if(!trip)return;
+ cancelAreaDrawing();mapPickTarget=null;clearAddressPreview();
+ for(const id of ['start',...waypointIds(),'end'])delete selectedLocations[id];
+ $('waypoints').replaceChildren();
+ for(let i=0;i<trip.stops.length-2;i++)addWaypoint();
+ ['start',...waypointIds(),'end'].forEach((id,i)=>{clearAddress(id);$(id).value=trip.stops[i].text;if(trip.stops[i].selected)selectedLocations[id]=trip.stops[i].selected;});
+ $('team').value=colors[trip.team]?trip.team:'BLUE';
+ $('budget').value=trip.budget;$('strategy').value=trip.strategy;
+ $('include-places').checked=trip.places.enabled;$('place-weight').value=trip.places.weight;$('place-remaining').value=trip.places.remaining;
+ excludedPlaceIds=new Set(trip.places.excluded);placeScoringWeek=trip.places.week;
+ $('place-settings-status').textContent='Restored place settings. Check weekly points remaining before searching; visited exclusions are checked against the scoring week.';
+ allowedBounds=trip.area;
+ if(areaLayer){map.removeLayer(areaLayer);areaLayer=null;}
+ if(allowedBounds)areaLayer=(allowedBounds.type==='Polygon'?L.geoJSON(allowedBounds,{style:{color:'#f59e0b',weight:2,dashArray:'7 5',fillOpacity:.04,interactive:false}}):L.rectangle([[allowedBounds.south,allowedBounds.west],[allowedBounds.north,allowedBounds.east]],{color:'#f59e0b',weight:2,dashArray:'7 5',fillOpacity:.04,interactive:false})).addTo(map);
+ finishRouteAreaChange();updateMarkers();clickCount=2;
+ const bounds=areaLayer?.getBounds()||(markers.getLayers().length?L.featureGroup(markers.getLayers()).getBounds():null);
+ if(bounds?.isValid())map.fitBounds(bounds,{padding:[30,30],maxZoom:15});
+ $('saved-trip-status').textContent=`Loaded “${trip.name}”. Review weekly place settings and search for fresh routes.`;
+};
+renderSavedTrips();
 async function init(){
  if(!window.L){$('status').textContent='Map library could not load. Check access to unpkg.com and reload.';$('submit').disabled=true;return;}
  map=L.map('map',{preferCanvas:true}).setView([40.6,-111.9],10);
@@ -596,10 +1013,31 @@ async function init(){
  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
  initPanelResize();
  territories=L.layerGroup().addTo(map);routeLayer=L.layerGroup().addTo(map);markers=L.layerGroup().addTo(map);targets=L.layerGroup().addTo(map);
+ radioLayer=L.layerGroup().addTo(map);
+ bonusPlacesLayer=L.layerGroup().addTo(map);
  updateTeam();
  map.on('moveend',drawBoard);
+ map.on('moveend',drawRadioCoverage);
+ map.on('contextmenu',e=>{
+  if(areaDrawing?.kind!=='polygon')return;
+  L.DomEvent.preventDefault(e.originalEvent);
+  if(areaDrawing.busy)return;
+  if(areaDrawing.points.length<3){
+   $('route-area-status').textContent='Add at least 3 corners before finishing. Right-click or choose Finish shape when ready.';
+   return;
+  }
+  $('finish-route-polygon').click();
+ });
+ map.on('mousemove',e=>{
+  if(areaDrawing?.kind==='polygon'){if(!areaDrawing.busy)previewPolygon(e.latlng);return;}
+  if(!areaDrawing?.corner)return;
+  const bounds=L.latLngBounds(areaDrawing.corner,e.latlng);
+  if(areaPreview)areaPreview.setBounds(bounds);
+  else areaPreview=L.rectangle(bounds,{color:'#f59e0b',weight:2,dashArray:'7 5',fillOpacity:.06,interactive:false}).addTo(map);
+ });
  map.on('click',e=>{
   if(searching)return;
+  if(handleAreaClick(e.latlng))return;
   if(mapPickTarget){
    const id=mapPickTarget;mapPickTarget=null;
    clearAddress(id);$(id).value=`${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
@@ -612,12 +1050,17 @@ async function init(){
  });
  ['start','end'].forEach(id=>$(id).addEventListener('change',updateMarkers));
  $('submit').disabled=true;
- await refreshBoard(true);
+ await Promise.allSettled([refreshBoard(true),refreshRadioCoverage()]);
  $('status').textContent=boardAvailable?'Choose start and destination to plan a drive.':'Waiting for capture data; automatic checks will continue.';
- setInterval(()=>refreshBoard(),30*60*1000);
+ setInterval(()=>{refreshBoard();refreshRadioCoverage();},30*60*1000);
 }
 function setSearching(active){
  searching=active;
+ if($('clear-displayed-route'))$('clear-displayed-route').disabled=active;
+ for(const id of ['save-trip','saved-trip','trip-name'])$(id).disabled=active;
+ $('load-trip').disabled=active||!$('saved-trip').value;$('delete-trip').disabled=active||!$('saved-trip').value;
+ if(active){cancelAreaDrawing();clearAddressPreview();}
+ $('clear-route-area').disabled=active||!allowedBounds;
  const progress=$('search-progress');
  if(active){progress.dataset.meshState='searching';progress.querySelector('.mesh-caption').textContent='Exploring the mesh';}
  else{
@@ -625,7 +1068,7 @@ function setSearching(active){
   progress.dataset.meshState=complete?'complete':'idle';
   progress.querySelector('.mesh-caption').textContent=complete?'Route search complete':'Mesh standing by';
  }
- for(const id of ['team','start','end','start-lookup','end-lookup','budget','strategy','submit','print'])$(id).disabled=active;
+ for(const id of ['include-places','place-weight','place-remaining','draw-route-area','draw-route-polygon','team','start','end','start-lookup','end-lookup','budget','strategy','submit','print'])$(id).disabled=active;
  $('submit').textContent=active ? 'Searching routes…' : `Find ${selectedTeam()} opportunities →`;
  $('submit').disabled=active||!boardAvailable;
  $('results').setAttribute('aria-busy',String(active));
@@ -653,10 +1096,28 @@ async function streamedPlan(payload, onProgress, signal){
  if(!finalResult)throw Error('The connection ended before the search finished. Please retry.');
  return finalResult;
 }
+function clearStopErrors(){
+ $('route-input-error').hidden=true;$('route-input-error').textContent='';
+ for(const id of ['start',...waypointIds(),'end'])$(id).removeAttribute('aria-invalid');
+}
+$('planner').addEventListener('input',clearStopErrors);
+async function validateTripArea(start,end,waypoints,signal){
+ if(!allowedBounds)return;
+ const response=await fetch('/api/validate-route-area',{method:'POST',signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({start,end,waypoints,allowed_bounds:allowedBounds})});
+ const data=await response.json();if(response.ok)return;
+ const message=data.error||'Could not validate the trip area.';
+ $('route-input-error').textContent=message;$('route-input-error').hidden=false;
+ const ids=(data.outside_stops||[]).map(key=>key==='start'||key==='end'?key:waypointIds()[Number(key.slice(1))-1]).filter(Boolean);
+ ids.forEach(id=>$(id).setAttribute('aria-invalid','true'));
+ const error=Error(message);error.boundaryValidation=true;
+ // Finish re-enabling the inputs before returning focus to the invalid stop.
+ error.invalidStop=ids[0];throw error;
+}
 $('planner').addEventListener('submit',async e=>{
  e.preventDefault();
  if(searching)return;
- let timer=null;
+ let timer=null,invalidStop=null;
+ clearStopErrors();
  try{
   searchController=new AbortController();setSearching(true);updateMarkers();
   $('search-progress').hidden=false;$('progress-bar').value=0;$('progress-percent').textContent='0%';
@@ -677,24 +1138,33 @@ $('planner').addEventListener('submit',async e=>{
    $('status').textContent=`Choose the matching addresses below the inputs, then find ${selectedTeam()} opportunities again.`;
    $('progress-stage').textContent='Waiting for address selection';return;
   }
+  $('progress-stage').textContent='Checking stops against the drawn area…';
+  await validateTripArea(start,end,requiredWaypoints,searchController.signal);
   updateMarkers();
   const requestedLabels={start:$('start').value,end:$('end').value,waypoints:waypointIds().map(id=>$(id).value)};
-  const data=await streamedPlan({team:selectedTeam(),start,end,waypoints:requiredWaypoints,detour_minutes:Number($('budget').value),strategy:$('strategy').value},event=>{
+  const data=await streamedPlan({place_options:{enabled:$('include-places').checked,weight:Number($('place-weight').value),remaining:Number($('place-remaining').value),excluded:[...excludedPlaceIds],week:placeScoringWeek},allowed_bounds:allowedBounds,team:selectedTeam(),start,end,waypoints:requiredWaypoints,detour_minutes:Number($('budget').value),strategy:$('strategy').value},event=>{
    lastUpdate=Date.now();$('progress-bar').value=event.percent;
    $('progress-percent').textContent=`${Math.floor(event.percent)}%`;
    $('progress-stage').textContent=event.message;updateTime();
   },searchController.signal);
   result=data;tripLabels=requestedLabels;renderFeedStatus();
+  if(data.places?.week_start){
+   placeScoringWeek=data.places.week_start;excludedPlaceIds=new Set(data.places.excluded||[]);
+   $('place-remaining').value=String(data.places.remaining);
+   $('place-settings-status').textContent=data.places.available?`Week ${placeScoringWeek} · ${data.places.places.length} active places loaded. ${data.places.truncated?'Source list is incomplete. ':''}Bonuses remain estimates.`:(data.places.error||'Places unavailable; territory-only search.');
+  }
   $('progress-bar').value=100;$('progress-percent').textContent='100%';$('progress-stage').textContent='Search complete';
   showComparison();showActiveResult();
   $('status').textContent=`${data.strategy==='beam'?'Beam':'Greedy'}: ${data.routes.length} route options within budget. ${data.routing_metrics?.workers||1} routing workers; average request ${data.routing_metrics?.mean_request_seconds||0}s (including queue/rate-limit waits). ${data.failed_candidates ? `${data.failed_candidates} detour requests failed. ` : ''}Green outlines show targets; capture is not guaranteed.`;
  }catch(error){
   const cancelled=error.name==='AbortError';
+  invalidStop=error.invalidStop;
   $('status').textContent=cancelled?'Search cancelled. You can change the settings and try again.':error.message;
-  $('progress-stage').textContent=cancelled?'Search cancelled':'Search failed';
+  $('progress-stage').textContent=cancelled?'Search cancelled':error.boundaryValidation?'Stops outside route area':'Search failed';
  }finally{
   if(timer)clearInterval(timer);
   searchController=null;setSearching(false);
+  if(invalidStop)$(invalidStop)?.focus();
  }
 });
 $('print').onclick=()=>window.print();

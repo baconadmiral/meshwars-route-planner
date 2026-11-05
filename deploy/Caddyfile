@@ -1,0 +1,8 @@
+{$PLANNER_DOMAIN} {
+	basic_auth {
+		{$PLANNER_USER} {$PLANNER_PASSWORD_HASH}
+	}
+	reverse_proxy planner:8000 {
+		flush_interval -1
+	}
+}

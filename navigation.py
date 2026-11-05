@@ -1,11 +1,13 @@
 """Portable navigation handoff and lossless GPX track export."""
 from teams import validate_team
+from planner import distance_meters
 import math
 from urllib.parse import urlencode
 import xml.etree.ElementTree as ET
 
 GPX_NS='http://www.topografix.com/GPX/1/1'
 ET.register_namespace('',GPX_NS)
+GOOGLE_MAPS_WAYPOINT_LIMIT = 9
 
 
 def coordinate(value):
@@ -21,6 +23,54 @@ def coordinate(value):
 
 def format_location(point):
     return f'{point[1]:.6f},{point[0]:.6f}'
+
+
+def handoff_preview(coords, points):
+    """Match exported stops to ordered track positions and show the gaps between them.
+
+    This is the planner's geometry, not a prediction of Google's road choices.
+    Stops may be off the track because the router snapped them to a nearby road.
+    """
+    lengths=[distance_meters(a,b) for a,b in zip(coords,coords[1:])]
+    cumulative=[0.]
+    for length in lengths:
+        cumulative.append(cumulative[-1]+length)
+    positions=[0.]
+    for point in points[1:-1]:
+        scale=max(.1,math.cos(math.radians(point[1])))
+        best=None
+        for i,(a,b) in enumerate(zip(coords,coords[1:])):
+            if cumulative[i+1]<positions[-1]:
+                continue
+            dx,dy=(b[0]-a[0])*scale,b[1]-a[1]
+            px,py=(point[0]-a[0])*scale,point[1]-a[1]
+            square=dx*dx+dy*dy
+            lower=(positions[-1]-cumulative[i])/lengths[i] if lengths[i] else 0.
+            fraction=max(0.,lower,min(1.,(px*dx+py*dy)/square)) if square else 0.
+            position=cumulative[i]+fraction*lengths[i]
+            candidate=(math.hypot(px-fraction*dx,py-fraction*dy),position)
+            if best is None or candidate<best:
+                best=candidate
+        positions.append(best[1] if best else cumulative[-1])
+    positions.append(cumulative[-1])
+
+    def track_point(position):
+        for i,length in enumerate(lengths):
+            if length and position<=cumulative[i+1]:
+                fraction=max(0.,min(1.,(position-cumulative[i])/length))
+                return [a+fraction*(b-a) for a,b in zip(coords[i],coords[i+1])]
+        return list(coords[-1])
+
+    legs=[]
+    for index,(start,end) in enumerate(zip(positions,positions[1:])):
+        track=[track_point(start)]
+        track.extend(list(p) for p,distance in zip(coords,cumulative) if start<distance<end)
+        track.append(track_point(end))
+        legs.append({'from_stop':index+1,'to_stop':index+2,
+                     'distance_meters':round(end-start,1),'long_gap':end-start>2000,
+                     'geometry':{'type':'LineString','coordinates':track}})
+    return {'legs':legs,'gap_threshold_meters':2000,
+            'intermediate_stop_count':len(points)-2,'waypoint_limit':GOOGLE_MAPS_WAYPOINT_LIMIT}
 
 
 def build_export(route):
@@ -44,8 +94,9 @@ def build_export(route):
         raise ValueError('Invalid stop labels.')
     labels=['A']+[str(raw_labels[i])[:80] if i<len(raw_labels) else f'Detour {i+1}' for i in range(len(via))]+['B']
     sections=[]
-    for start in range(0,len(points)-1,4):
-        end=min(start+4,len(points)-1)
+    section_legs=GOOGLE_MAPS_WAYPOINT_LIMIT+1
+    for start in range(0,len(points)-1,section_legs):
+        end=min(start+section_legs,len(points)-1)
         stops=points[start:end+1]
         params={'api':'1','origin':format_location(stops[0]),'destination':format_location(stops[-1]),
                 'travelmode':'driving','dir_action':'navigate'}
@@ -67,4 +118,5 @@ def build_export(route):
     for lon,lat in coords:
         ET.SubElement(segment,f'{{{GPX_NS}}}trkpt',{'lat':str(lat),'lon':str(lon)})
     gpx=ET.tostring(root,encoding='utf-8',xml_declaration=True).decode()
-    return {'sections':sections,'gpx':gpx,'trackpoint_count':len(coords),'stop_count':len(points)}
+    return {'sections':sections,'gpx':gpx,'trackpoint_count':len(coords),'stop_count':len(points),
+            'preview':handoff_preview(coords,points)}

@@ -4,3 +4,10 @@ nodes.json
 .env
 
 .cache/
+
+.env.*
+!.env.example
+.venv/
+
+node_modules/
+tests/browser/test-results/

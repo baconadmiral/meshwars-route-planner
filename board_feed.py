@@ -35,12 +35,13 @@ def revision(data):
 
 
 class BoardFeed:
-    def __init__(self, seed_path, cache_path, url='https://meshwars.com/get-nodes', interval=1800, capture_users=None):
+    def __init__(self, seed_path, cache_path, url='https://meshwars.com/get-nodes', interval=1800, capture_users=None, team_scores=None):
         if not math.isfinite(interval) or interval < 15:
             raise ValueError('Board refresh interval must be at least 15 seconds.')
         self.seed_path, self.cache_path = Path(seed_path), Path(cache_path)
         self.url, self.interval = url, interval
         self.capture_users = capture_users
+        self.team_scores = team_scores
         self._lock, self._refresh_lock = threading.Lock(), threading.Lock()
         self._stop, self._wake = threading.Event(), threading.Event()
         self._thread = None
@@ -78,6 +79,7 @@ class BoardFeed:
                     'stale': self.source != 'live' or self.error is not None,
                     'error': self.error, 'cache_error': self.cache_error,
                     'attribution': self.capture_users.status() if self.capture_users else {'configured':False,'partial':True}}
+            data['team_scores'] = self.team_scores.snapshot() if self.team_scores else {'available':False,'teams':[]}
             if include_coverage:
                 data['coverage'] = self.board['coverage'] if self.board else []
             return data
@@ -128,6 +130,8 @@ class BoardFeed:
             if self.capture_users is not None:
                 self.capture_users.refresh()
                 board = self.capture_users.enrich(board)
+            if self.team_scores is not None:
+                self.team_scores.refresh()
             checked_at = time.time()
             cache_error = None
             try:

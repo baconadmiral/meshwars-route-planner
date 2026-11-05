@@ -1,0 +1,41 @@
+services:
+  planner:
+    build:
+      context: .
+      target: production
+    image: meshwars-route-planner:local
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PLANNER_PORT:-8000}:8000"
+    environment:
+      DATA_DIR: /data
+      BOARD_PATH: ${BOARD_PATH:-/data/seed-board.json}
+      MESHWARS_PLACES_URL: ${MESHWARS_PLACES_URL:-https://meshwars.com/api/places}
+      MESHWARS_SCORES_URL: ${MESHWARS_SCORES_URL:-https://meshwars.com/scores}
+      MESHWARS_REFRESH_SECONDS: ${MESHWARS_REFRESH_SECONDS:-1800}
+      OSRM_URL: ${OSRM_URL:-https://router.project-osrm.org}
+      OSRM_WORKERS: ${OSRM_WORKERS:-4}
+      OSRM_REQUEST_INTERVAL: ${OSRM_REQUEST_INTERVAL:-1}
+      PHOTON_URL: ${PHOTON_URL:-https://photon.komoot.io}
+      MAX_CONCURRENT_SEARCHES: ${MAX_CONCURRENT_SEARCHES:-2}
+      FREQMAPPER_PARTNER_TOKEN: ${FREQMAPPER_PARTNER_TOKEN:-}
+      FREQMAPPER_REGION: ${FREQMAPPER_REGION:-SLC}
+    volumes:
+      - planner-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 2
+    pids_limit: 128
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  planner-data:

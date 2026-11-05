@@ -1,0 +1,126 @@
+{
+  "route": {
+    "geometry": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          0,
+          0
+        ],
+        [
+          0.01,
+          0
+        ],
+        [
+          0.01,
+          0.01
+        ],
+        [
+          0.02,
+          0.02
+        ]
+      ]
+    },
+    "via_points": [
+      [
+        0.01,
+        0
+      ]
+    ],
+    "stop_labels": [
+      "Exploration"
+    ],
+    "legs": [],
+    "duration": 1500,
+    "distance": 5000,
+    "capture_value": 8,
+    "target_count": 8,
+    "target_ids": [],
+    "easy_enemy_count": 3,
+    "hard_enemy_count": 0,
+    "unknown_score_count": 0,
+    "enemy_count": 3,
+    "unmapped_count": 5,
+    "square_count": 8
+  },
+  "export": {
+    "sections": [
+      {
+        "url": "https://www.google.com/maps/dir/?api=1&origin=0.000000%2C0.000000&destination=0.020000%2C0.020000&travelmode=driving&dir_action=navigate&waypoints=0.000000%2C0.010000",
+        "from_label": "A",
+        "to_label": "B",
+        "stops": [
+          [
+            0,
+            0
+          ],
+          [
+            0.01,
+            0
+          ],
+          [
+            0.02,
+            0.02
+          ]
+        ],
+        "labels": [
+          "A",
+          "Exploration",
+          "B"
+        ]
+      }
+    ],
+    "gpx": "<?xml version='1.0' encoding='utf-8'?>\n<gpx xmlns=\"http://www.topografix.com/GPX/1/1\" version=\"1.1\" creator=\"MeshWars BLUE Route Planner\"><wpt lat=\"0\" lon=\"0\"><name>A</name></wpt><wpt lat=\"0\" lon=\"0.01\"><name>Exploration</name></wpt><wpt lat=\"0.02\" lon=\"0.02\"><name>B</name></wpt><trk><name>MeshWars BLUE planned route</name><desc>Imported track of the planned road geometry. Turn-by-turn instructions are not embedded.</desc><trkseg><trkpt lat=\"0\" lon=\"0\" /><trkpt lat=\"0\" lon=\"0.01\" /><trkpt lat=\"0.01\" lon=\"0.01\" /><trkpt lat=\"0.02\" lon=\"0.02\" /></trkseg></trk></gpx>",
+    "trackpoint_count": 4,
+    "stop_count": 3,
+    "preview": {
+      "legs": [
+        {
+          "from_stop": 1,
+          "to_stop": 2,
+          "distance_meters": 1113.2,
+          "long_gap": false,
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                0.01,
+                0.0
+              ]
+            ]
+          }
+        },
+        {
+          "from_stop": 2,
+          "to_stop": 3,
+          "distance_meters": 2687.5,
+          "long_gap": true,
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                0.01,
+                0.0
+              ],
+              [
+                0.01,
+                0.01
+              ],
+              [
+                0.02,
+                0.02
+              ]
+            ]
+          }
+        }
+      ],
+      "gap_threshold_meters": 2000,
+      "intermediate_stop_count": 1,
+      "waypoint_limit": 9
+    }
+  }
+}

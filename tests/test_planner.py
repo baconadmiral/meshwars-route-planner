@@ -52,6 +52,15 @@ class PlannerTests(unittest.TestCase):
 
 
 class ExplorationTests(unittest.TestCase):
+    def test_territory_breakdown_matches_unique_square_priority(self):
+        cells=[dict(CELL,cell_id=f'0_{i}',owner_team=team,scores=scores)
+               for i,(team,scores) in enumerate([
+                   ('RED',{'RED':1}),('RED',{'RED':2}),('RED',{}),('BLUE',{'BLUE':100})])]
+        scored=opportunity_score(route([[.001,.001],[4.5*LON_STEP,.001],[.001,.001]]),cells)
+        self.assertEqual(scored['territory_breakdown'],dict(easy_enemy=1,defended_enemy=.25,unknown_enemy=.5,unpainted=1))
+        self.assertEqual(sum(scored['territory_breakdown'].values()),scored['territory_value'])
+        self.assertEqual(scored['capture_value'],2.75)
+
     def test_unpainted_cells_are_targets_and_blue_cells_are_not(self):
         blue = dict(CELL,cell_id='0_0',west=0,east=.00384,south=0,north=.0027,owner_team='BLUE')
         r = route([[.001,.001],[.007,.001],[.001,.001]])

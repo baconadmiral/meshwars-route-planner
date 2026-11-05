@@ -152,7 +152,7 @@ class FeedHttpTests(unittest.TestCase):
                 self.assertIs(coverage,initial['coverage'])
                 feed.board=board('RED');feed.version='new-revision'
                 self.assertEqual(coverage[0]['owner_team'],'BLUE')
-                return {'routes':[]}
+                return {'routes':[], 'baseline':{'geometry':{'coordinates':[[0,0],[.01,.01]]}, 'target_ids':[]}}
             with patch('server.search_routes',side_effect=search):
                 head,data=self.request(SimpleNamespace(board_feed=feed),'/api/plan','POST',
                                        {'start':[0,0],'end':[.01,.01],'detour_minutes':0})

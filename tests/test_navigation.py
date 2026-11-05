@@ -41,9 +41,30 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(recovered,[route['geometry']['coordinates'][0],*via,route['geometry']['coordinates'][-1]])
         for section in exported['sections']:
             params=parse_qs(urlparse(section['url']).query)
-            self.assertLessEqual(len(section['stops'])-2,3)
-            self.assertLessEqual(len(params.get('waypoints',[''])[0].split('|')),3)
+            self.assertLessEqual(len(section['stops'])-2,9)
+            self.assertLessEqual(len(params.get('waypoints',[''])[0].split('|')),9)
             self.assertLessEqual(len(section['url']),2048)
+
+    def test_nine_detours_fit_one_app_link(self):
+        via=[[-111.97+i*.001,41.21] for i in range(9)]
+        exported=build_export(self.route(via))
+        self.assertEqual(len(exported['sections']),1)
+        section=exported['sections'][0]
+        params=parse_qs(urlparse(section['url']).query)
+        self.assertEqual(len(params['waypoints'][0].split('|')),9)
+        self.assertEqual(section['stops'][1:-1],via)
+        self.assertEqual(section['labels'],['A',*[f'W{i+1}' for i in range(9)],'B'])
+
+    def test_ten_detours_split_without_losing_boundary_stop(self):
+        via=[[-111.97+i*.001,41.21] for i in range(10)]
+        route=self.route(via)
+        sections=build_export(route)['sections']
+        self.assertEqual(len(sections),2)
+        self.assertEqual(len(sections[0]['stops'])-2,9)
+        self.assertEqual(sections[0]['stops'][-1],via[-1])
+        self.assertEqual(sections[1]['stops'],[via[-1],route['geometry']['coordinates'][-1]])
+        self.assertEqual(sections[0]['stops']+sections[1]['stops'][1:],
+                         [route['geometry']['coordinates'][0],*via,route['geometry']['coordinates'][-1]])
 
     def test_gpx_retains_all_track_coordinates_and_escapes_labels(self):
         route=self.route([[-111.96,41.21]])
@@ -69,6 +90,46 @@ class NavigationTests(unittest.TestCase):
         section=exported['sections'][0]
         self.assertIn([0,.001],section['stops'])
         self.assertEqual([label for label in section['labels'] if label in ('Out','Return')],['Out','Return'])
+
+    def test_preview_retains_detour_geometry_and_flags_long_gap(self):
+        route={'geometry':{'coordinates':[[0,0],[0,.03],[.03,.03],[.03,0]]}}
+        exported=build_export(route)
+        preview=exported['preview']
+        self.assertEqual(preview['intermediate_stop_count'],0)
+        self.assertEqual(preview['waypoint_limit'],9)
+        self.assertEqual(len(preview['legs']),1)
+        self.assertTrue(preview['legs'][0]['long_gap'])
+        self.assertEqual(preview['legs'][0]['geometry']['coordinates'],route['geometry']['coordinates'])
+        self.assertGreater(preview['legs'][0]['distance_meters'],9000)
+
+    def test_preview_matches_sparse_segments_in_trip_order(self):
+        route={'geometry':{'coordinates':[[0,0],[.02,0],[.02,.02]]},
+               'via_points':[[.01,.00001]],'stop_labels':['Keep street']}
+        exported=build_export(route)
+        preview=exported['preview']
+        first,second=preview['legs']
+        self.assertEqual((first['from_stop'],first['to_stop']),(1,2))
+        self.assertEqual((second['from_stop'],second['to_stop']),(2,3))
+        self.assertFalse(first['long_gap'])
+        self.assertTrue(second['long_gap'])
+        self.assertEqual(first['geometry']['coordinates'][-1],[.01,0.])
+        self.assertEqual(second['geometry']['coordinates'][0],[.01,0.])
+        self.assertIn([.02,0],second['geometry']['coordinates'])
+        self.assertAlmostEqual(sum(p['distance_meters'] for p in preview['legs']),4452.8,delta=.2)
+        # Pins still use the exported coordinate; matching must not rewrite stops.
+        self.assertEqual(exported['sections'][0]['stops'][1],[.01,.00001])
+
+    def test_preview_handles_repeated_stops_and_section_boundaries(self):
+        route={'geometry':{'coordinates':[[0,0],[0,.001],[.001,.001]]},
+               'via_points':[[0,.001]]*10}
+        exported=build_export(route)
+        self.assertEqual(len(exported['sections']),2)
+        legs=exported['preview']['legs']
+        self.assertEqual(len(legs),11)
+        self.assertEqual([leg['from_stop'] for leg in legs],list(range(1,12)))
+        self.assertTrue(all(leg['distance_meters']>=0 for leg in legs))
+        self.assertTrue(all(legs[i]['geometry']['coordinates'][-1]==legs[i+1]['geometry']['coordinates'][0]
+                            for i in range(len(legs)-1)))
 
     def test_invalid_routes_rejected(self):
         for route in (None,{}, {'geometry':{'coordinates':[]}},

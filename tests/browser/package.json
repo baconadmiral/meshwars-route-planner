@@ -1,0 +1,10 @@
+{
+  "name": "meshwars-browser-regressions",
+  "private": true,
+  "scripts": {"test": "node handoff.cjs"},
+  "devDependencies": {
+    "leaflet": "1.9.4",
+    "playwright": "1.64.1",
+    "qrcode-generator": "1.4.4"
+  }
+}

@@ -1,0 +1,20 @@
+name: Container checks
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+      - run: docker build --target test -t meshwars-route-planner:test .
+      - run: docker build --target production -t meshwars-route-planner:check .
+  browser:
+    runs-on: ubuntu-24.04
+    container: mcr.microsoft.com/playwright:v1.64.1-noble
+    defaults:
+      run:
+        working-directory: tests/browser
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci --ignore-scripts
+      - run: npm test
