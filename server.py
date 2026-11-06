@@ -16,6 +16,8 @@ from board_feed import BoardFeed
 from team_scores import TeamScores
 from places import PlacesFeed, place_options
 from capture_users import CaptureUsers
+from drive_reports import DriveReports
+from square_api import SquareAPI
 from navigation import build_export
 from gpx_shares import GPXShares, ShareCapacityError
 from teams import validate_team
@@ -141,6 +143,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Length',str(len(item['body'])))
             self.end_headers()
             return self.wfile.write(item['body'])
+        if path.startswith('/api/cells/'):
+            try:
+                detail=self.server.square_api.cell(path[len('/api/cells/'):])
+                self.server.board_feed.apply_cell_detail(detail)
+                return self.send_json(detail)
+            except ValueError as error:return self.send_json({'error':str(error)},400)
+        if path == '/api/players':
+            return self.send_json(self.server.drives.players())
+        if path == '/api/drives/status':
+            return self.send_json(self.server.drives.status())
         if path == '/api/radio-coverage':
             return self.send_json(self.radio_snapshot())
         assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
@@ -156,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path not in ('/api/plan', '/api/plan-stream', '/api/geocode', '/api/board/refresh', '/api/route-export', '/api/validate-route-area', '/api/gpx-shares'):
+        if self.path not in ('/api/plan', '/api/plan-stream', '/api/geocode', '/api/board/refresh', '/api/route-export', '/api/validate-route-area', '/api/gpx-shares', '/api/drives/start', '/api/drives/report'):
             return self.send_error(404)
         streaming = False
         try:
@@ -165,6 +177,10 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= limit:
                 raise ValueError('Invalid request size.')
             data = json.loads(self.rfile.read(length))
+            if self.path in ('/api/drives/start','/api/drives/report'):
+                if not isinstance(data,dict):raise ValueError('Expected a JSON object.')
+                action=self.server.drives.start if self.path.endswith('/start') else self.server.drives.report
+                return self.send_json(action(data))
             if self.path == '/api/validate-route-area':
                 if any(key in data for key in ('start','end','waypoints')):parse_plan_request(data)
                 return self.send_json({'allowed_bounds': validate_bounds(data.get('allowed_bounds'))})
@@ -244,7 +260,9 @@ def main():
                          team_scores=TeamScores(ROOT/'.cache'/'team_scores.json',
                                                url=os.environ.get('MESHWARS_SCORES_URL','https://meshwars.com/scores')),
                          url=os.environ.get('MESHWARS_BOARD_URL', 'https://meshwars.com/get-nodes'),
-                         interval=float(os.environ.get('MESHWARS_REFRESH_SECONDS', '1800')))
+                         interval=float(os.environ.get('MESHWARS_REFRESH_SECONDS', '1800')),
+                               api_key=os.environ.get('MESHWARS_API_KEY'),
+                               api_url=os.environ.get('MESHWARS_API_URL','https://meshwars.com/api/v1'))
     except ValueError as error:
         parser.error(str(error))
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
@@ -253,6 +271,8 @@ def main():
                                           region=os.environ.get('FREQMAPPER_REGION', 'SLC'))
     server.radio_coverage.start()
     server.places_feed=PlacesFeed(os.environ.get('MESHWARS_PLACES_URL','https://meshwars.com/api/places'))
+    server.square_api = SquareAPI(os.environ.get('MESHWARS_API_KEY'),os.environ.get('MESHWARS_API_URL','https://meshwars.com/api/v1'))
+    server.drives = DriveReports(os.environ.get('MESHWARS_API_KEY'), os.environ.get('MESHWARS_API_URL','https://meshwars.com/api/v1'))
     server.board_feed = feed
     feed.start()
     print(f'MeshWars route planner: http://127.0.0.1:{args.port}', flush=True)

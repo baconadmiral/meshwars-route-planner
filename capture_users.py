@@ -43,6 +43,7 @@ class CaptureUsers:
         self.error=None
         try:
             cached=json.loads(self.cache_path.read_text())
+            if cached.get('board')!='meshtastic':raise ValueError('Wrong cached board.')
             rows=cached['events']
             self.events={row['cell_id']:row for row in rows if valid_event(row)}
             self.since=max((row['ts'] for row in self.events.values()),default=0)
@@ -52,7 +53,7 @@ class CaptureUsers:
 
     def status(self):
         with self._lock:
-            return {'configured':bool(self._key),'last_success':self.last_success,'error':self.error,
+            return {'board':'meshtastic','configured':bool(self._key),'last_success':self.last_success,'error':self.error,
                     'tracked_cells':len(self.events),'partial':True}
 
     def refresh(self):
@@ -60,7 +61,7 @@ class CaptureUsers:
             return
         try:
             # Replay the last timestamp to avoid losing events with equal second timestamps.
-            query=urlencode({'board':'meshcore','since':max(0,self.since-1),'limit':500})
+            query=urlencode({'board':'meshtastic','since':max(0,self.since-1),'limit':500})
             request=Request(self.api_url+'/captures?'+query,
                             headers={'X-API-Key':self._key,'Accept':'application/json','User-Agent':'MeshWarsBluePlanner/0.1'})
             with urlopen(request,timeout=15) as response:
@@ -70,7 +71,7 @@ class CaptureUsers:
                 payload=json.loads(raw)
             if not isinstance(payload,dict) or not isinstance(payload.get('captures'),list):
                 raise ValueError('Invalid capture feed.')
-            if payload.get('board') not in (None,'meshcore','mc'):
+            if payload.get('board') not in ('meshtastic','mt'):
                 raise ValueError('Wrong capture board.')
             rows=payload['captures']
             if not all(valid_event(row) for row in rows):
@@ -105,7 +106,7 @@ class CaptureUsers:
         try:
             with tempfile.NamedTemporaryFile(mode='w',dir=self.cache_path.parent,delete=False) as handle:
                 temp_path=Path(handle.name)
-                json.dump({'events':list(events.values()),'last_success':now},handle)
+                json.dump({'board':'meshtastic','events':list(events.values()),'last_success':now},handle)
             os.replace(temp_path,self.cache_path)
         finally:
             if temp_path is not None:temp_path.unlink(missing_ok=True)

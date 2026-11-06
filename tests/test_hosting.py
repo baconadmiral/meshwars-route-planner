@@ -25,6 +25,29 @@ class HostingTests(unittest.TestCase):
         self.client=self.app.test_client()
         self.payload={'start':[.001,.001],'end':[.01,.001],'detour_minutes':0,'team':'ORANGE'}
 
+    def test_square_api_updates_board_attribution(self):
+        self.runtime.square_api=Mock()
+        detail={'cell_id':'0_0','captured_by':'🥓','capture_event':{'cell_id':'0_0','ts':100,'team':'BLUE','player':'🥓'}}
+        self.runtime.square_api.cell.return_value=detail
+        self.assertEqual(self.client.get('/api/cells/0_0').get_json(),detail)
+        self.runtime.board.apply_cell_detail.assert_called_once_with(detail)
+        self.runtime.square_api.cell.side_effect=ValueError('Invalid square ID.')
+        self.assertEqual(self.client.get('/api/cells/bad').status_code,400)
+
+    def test_drive_api_delegates_without_exposing_token(self):
+        self.runtime.drives=Mock()
+        self.runtime.drives.status.return_value={'configured':True,'board':'meshtastic'}
+        self.runtime.drives.players.return_value={'configured':True,'available':True,'players':[{'name':'🥓','team':'BLUE'}]}
+        self.assertEqual(self.client.get('/api/players').get_json()['players'][0]['name'],'🥓')
+        self.runtime.drives.start.return_value={'player':'🥓','node':'!0123abcd','started_at':100}
+        self.runtime.drives.report.return_value={'unique_squares':2,'confirmed_total_points':None}
+        self.assertEqual(self.client.get('/api/drives/status').get_json()['configured'],True)
+        payload={'player':'🥓','node':'!0123abcd'}
+        self.assertEqual(self.client.post('/api/drives/start',json=payload).get_json()['player'],'🥓')
+        self.runtime.drives.start.assert_called_once_with(payload)
+        self.assertEqual(self.client.post('/api/drives/report',json=payload).get_json()['unique_squares'],2)
+        self.assertEqual(self.client.post('/api/drives/start',json=[]).status_code,400)
+
     def test_health_readiness_and_explicit_static_assets(self):
         self.assertEqual(self.client.get('/healthz').status_code,200)
         self.assertEqual(self.client.get('/readyz').status_code,200)

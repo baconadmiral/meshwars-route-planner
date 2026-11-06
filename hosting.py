@@ -16,6 +16,8 @@ from board_feed import BoardFeed
 from team_scores import TeamScores
 from places import PlacesFeed, place_options
 from capture_users import CaptureUsers
+from drive_reports import DriveReports
+from square_api import SquareAPI
 from geocoder import lookup_address
 from navigation import build_export
 from gpx_shares import GPXShares, ShareCapacityError
@@ -36,11 +38,15 @@ class Runtime:
                                team_scores=TeamScores(data_dir/'team_scores.json',
                                                      url=os.environ.get('MESHWARS_SCORES_URL','https://meshwars.com/scores')),
                                url=os.environ.get('MESHWARS_BOARD_URL', 'https://meshwars.com/get-nodes'),
-                               interval=float(os.environ.get('MESHWARS_REFRESH_SECONDS', '1800')))
+                               interval=float(os.environ.get('MESHWARS_REFRESH_SECONDS', '1800')),
+                               api_key=os.environ.get('MESHWARS_API_KEY'),
+                               api_url=os.environ.get('MESHWARS_API_URL','https://meshwars.com/api/v1'))
         self.radio = RadioCoverage(data_dir/'radio_coverage.json',
                                    token=os.environ.get('FREQMAPPER_PARTNER_TOKEN'),
                                    region=os.environ.get('FREQMAPPER_REGION', 'SLC'))
         self.places=PlacesFeed(os.environ.get('MESHWARS_PLACES_URL','https://meshwars.com/api/places'))
+        self.square_api = SquareAPI(os.environ.get('MESHWARS_API_KEY'),os.environ.get('MESHWARS_API_URL','https://meshwars.com/api/v1'))
+        self.drives = DriveReports(os.environ.get('MESHWARS_API_KEY'), os.environ.get('MESHWARS_API_URL', 'https://meshwars.com/api/v1'))
         self.stopping = threading.Event()
 
     def start(self):
@@ -134,6 +140,28 @@ def create_app(runtime, search_limit=2):
         if not isinstance(data, dict):
             raise ValueError('Expected a JSON object.')
         return data
+
+    @app.get('/api/cells/<cell_id>')
+    def cell_details(cell_id):
+        detail=runtime.square_api.cell(cell_id)
+        runtime.board.apply_cell_detail(detail)
+        return jsonify(detail)
+
+    @app.get('/api/players')
+    def players():
+        return jsonify(runtime.drives.players())
+
+    @app.get('/api/drives/status')
+    def drive_status():
+        return jsonify(runtime.drives.status())
+
+    @app.post('/api/drives/start')
+    def drive_start():
+        return jsonify(runtime.drives.start(json_object()))
+
+    @app.post('/api/drives/report')
+    def drive_report():
+        return jsonify(runtime.drives.report(json_object()))
 
     @app.post('/api/board/refresh')
     def refresh():

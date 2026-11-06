@@ -31,7 +31,7 @@ class CaptureUsersTests(unittest.TestCase):
     def tearDown(self):self.temp.cleanup()
 
     def refresh(self,rows):
-        with patch('capture_users.urlopen',return_value=io.BytesIO(json.dumps({'board':'meshcore','captures':rows}).encode())) as fetch:
+        with patch('capture_users.urlopen',return_value=io.BytesIO(json.dumps({'board':'meshtastic','captures':rows}).encode())) as fetch:
             self.client.refresh()
             return fetch
 
@@ -44,6 +44,14 @@ class CaptureUsersTests(unittest.TestCase):
         original['coverage'][0]['captured_by']='Stale name'
         self.assertNotIn('captured_by',enrich_board(original,{})['coverage'][0])
 
+    def test_old_meshcore_cache_is_ignored_and_wrong_board_is_rejected(self):
+        self.cache.write_text(json.dumps({'board':'meshcore','events':[event()]}))
+        self.assertEqual(CaptureUsers(self.cache).events,{})
+        with patch('capture_users.urlopen',return_value=io.BytesIO(json.dumps({'board':'meshcore','captures':[event()]}).encode())):
+            self.client.refresh()
+        self.assertEqual(self.client.events,{})
+        self.assertIsNotNone(self.client.status()['error'])
+
     def test_no_key_makes_no_outbound_requests(self):
         client=CaptureUsers(self.cache)
         with patch('capture_users.urlopen') as fetch:
@@ -55,7 +63,7 @@ class CaptureUsersTests(unittest.TestCase):
         request=fetch.call_args.args[0]
         self.assertEqual(request.get_header('X-api-key'),'test-only-key')
         params=parse_qs(urlparse(request.full_url).query)
-        self.assertEqual(params['board'],['meshcore'])
+        self.assertEqual(params['board'],['meshtastic'])
         self.assertEqual(params['limit'],['500'])
         self.assertNotIn('test-only-key',self.cache.read_text())
         restarted=CaptureUsers(self.cache)
@@ -84,7 +92,7 @@ class CaptureUsersTests(unittest.TestCase):
         feed=BoardFeed(seed,self.root/'board.json',capture_users=self.client)
         previous=feed.snapshot()['revision']
         response=io.BytesIO(json.dumps(board()).encode());response.headers={}
-        captures=io.BytesIO(json.dumps({'board':'meshcore','captures':[event()]}).encode())
+        captures=io.BytesIO(json.dumps({'board':'meshtastic','captures':[event()]}).encode())
         with patch('board_feed.urlopen',return_value=response),patch('capture_users.urlopen',return_value=captures):
             feed.refresh()
         snapshot=feed.snapshot()

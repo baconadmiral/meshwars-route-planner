@@ -10,6 +10,16 @@ let map, territories, routeLayer, markers, targets, radioLayer, bonusPlacesLayer
 let excludedPlaceIds=new Set(),placeScoringWeek=null;
 let radioSnapshot=null,radioStartupChecks=0;
 let mapTeamFilter=null,capturedSquaresHidden=false;
+let mapPlayerFilter='',playerRoster=null;
+let squareLookupTimer=null,squareLookupBusy=false,squareLookupMoving=false,squareLookupPauseUntil=0,squareLookupError='';
+const automaticSquareRefreshEnabled=false;
+let squareLookupMinZoom=15;
+const squareLookupFreshMs=5*60*1000;
+try{const saved=Number(localStorage.getItem('square-detail-min-zoom'));if(Number.isInteger(saved)&&saved>=13&&saved<=19)squareLookupMinZoom=saved;}catch{}
+const squareLookupChecks=new Map();
+const refreshingSquares=new Map();
+let squareRefreshLayers=null,squareRefreshRenderer=null;
+const squareVersion=cell=>`${cell.cell_id}:${cell.owner_team}:${cell.captured_at??''}`;
 try{capturedSquaresHidden=localStorage.getItem('hide-captured-squares')==='true';}catch{}
 let searching = false, searchController = null;
 const selectedLocations = {};
@@ -126,8 +136,18 @@ function updateMarkers(){
  }
 }
 function waypointIds(){return [...document.querySelectorAll('#waypoints [data-waypoint]')].map(row=>row.dataset.waypoint);}
+function revealSidebarControl(control){
+ for(let parent=control?.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+}
+document.querySelectorAll('[data-sidebar-target]').forEach(button=>button.onclick=()=>{
+ const target=$(button.dataset.sidebarTarget);
+ if(target.tagName==='DETAILS')target.open=true;
+ revealSidebarControl(target);target.scrollIntoView({behavior:'smooth',block:'start'});
+});
+$('planner').addEventListener('invalid',event=>revealSidebarControl(event.target),true);
 function refreshWaypointLabels(){
  const rows=[...document.querySelectorAll('#waypoints [data-waypoint]')];
+ $('waypoint-options').querySelector('summary').firstChild.textContent=rows.length?`Waypoints · ${rows.length} stops`:'Waypoints';
  rows.forEach((row,index)=>{
   row.querySelector('label').textContent=`Waypoint W${index+1}`;
   row.querySelector('.waypoint-up').disabled=searching||index===0;
@@ -148,6 +168,7 @@ function pickWaypoint(id){
 }
 function addWaypoint(pickOnMap=false){
  if(searching||waypointIds().length>=8)return;
+ $('waypoint-options').open=true;
  const id=`waypoint-${++waypointCounter}`,row=document.createElement('div');
  row.className='waypoint-row';row.dataset.waypoint=id;
  row.innerHTML=`<label for="${id}"></label><input id="${id}" placeholder="Address or latitude, longitude" required autocomplete="off" aria-describedby="${id}-matches"><div class="waypoint-actions"><button id="${id}-lookup" class="lookup" type="button">Find address</button><button class="waypoint-map" type="button">Map</button><button class="waypoint-up" type="button" aria-label="Move waypoint up">↑</button><button class="waypoint-down" type="button" aria-label="Move waypoint down">↓</button><button class="waypoint-remove" type="button">Remove</button></div><div id="${id}-matches" class="address-options" aria-live="polite"></div>`;
@@ -270,6 +291,9 @@ function squareStyle(cell){
 }
 function captureVisible(cell,now=Date.now()/1000){
  if(capturedSquaresHidden&&cell)return false;
+ if(mapPlayerFilter&&!cell)return false;
+ if(mapPlayerFilter==='__unknown__'&&cell?.captured_by)return false;
+ if(mapPlayerFilter&&mapPlayerFilter!=='__unknown__'&&cell?.captured_by?.toLocaleLowerCase()!==mapPlayerFilter.toLocaleLowerCase())return false;
  if(mapTeamFilter&&cell?.owner_team!==mapTeamFilter)return false;
  if(captureDays===0)return true;
  const captured=cell?.captured_at;
@@ -283,10 +307,11 @@ function drawBoard(){
   if(targets)targets.clearLayers();
   $('capture-filter-status').textContent='0 squares match.';return;
  }
+ scheduleSquareLookups();
  const bounds=map.getBounds();
  const now=Date.now()/1000;
  const eligible=board.filter(c=>captureVisible(c,now));
- $('capture-filter-status').textContent=`${capturedSquaresHidden?'Captured squares hidden. ':''}${eligible.length.toLocaleString()} of ${board.length.toLocaleString()} squares match the display filters for ${mapTeamFilter||'all teams'}.${captureDays>0?' Missing or future capture times are hidden.':''}`;
+ $('capture-filter-status').textContent=`${capturedSquaresHidden?'Captured squares hidden. ':''}${eligible.length.toLocaleString()} of ${board.length.toLocaleString()} squares match the display filters for ${mapTeamFilter||'all teams'}${mapPlayerFilter?' · '+(mapPlayerFilter==='__unknown__'?'unknown capturer':mapPlayerFilter):''}.${captureDays>0?' Missing or future capture times are hidden.':''}`;
  const visible=eligible.filter(c=>bounds.intersects([[c.south,c.west],[c.north,c.east]]));
  if(targets && result?.routes?.[routeIndex])drawRouteTargets(result.routes[routeIndex]);
  if(visible.length>2500){return;}
@@ -295,12 +320,143 @@ function drawBoard(){
   rect.squareData=c;
   rect.on('mouseover',()=>rect.setStyle({stroke:true,color:colors[c.owner_team]||'#888888',weight:1,opacity:.75}));
   rect.on('mouseout',()=>rect.setStyle(squareStyle(c)));
+  const capturer=c.captured_by?` · Captured by ${escape(c.captured_by)}`:' · Capturer unknown';
   const captured=typeof c.captured_at==='number' && Number.isFinite(c.captured_at) && c.captured_at>0 ? ` · Captured ${new Date(c.captured_at*1000).toLocaleString()}` : '';
-  rect.bindTooltip(`${escape(c.owner_team)} · ${escape(c.cell_id)} · ${scoreLabel(c)}${captured}`);
+  rect.on('click',event=>{L.DomEvent.stopPropagation(event);showSquareDetails(c);});
+  rect.bindTooltip(`${escape(c.owner_team)} · ${escape(c.cell_id)} · ${scoreLabel(c)}${capturer}${captured} · Click for API details`);
  }
  // Rebuilt fills must stay beneath target outlines and the selected route.
  if(targets)targets.eachLayer(layer=>layer.bringToFront?.());
  if(routeLayer)routeLayer.eachLayer(layer=>layer.bringToFront?.());
+}
+function updateDetailZoomControl(){
+ if(!$('detail-zoom-readout')||!map)return;
+ const zoom=map.getZoom();
+ $('detail-zoom-readout').textContent=`Zoom ${zoom} · Details at ${squareLookupMinZoom}+`;
+ $('detail-use-zoom').disabled=zoom<13;
+ $('detail-use-zoom').title=zoom<13?'Zoom to level 13 or closer before choosing a detail threshold.':'Use the current zoom as the minimum for automatic square details.';
+}
+function initDetailZoomControl(){
+ if(!automaticSquareRefreshEnabled)return;
+ const control=L.control({position:'topleft'});
+ control.onAdd=()=>{
+  const panel=L.DomUtil.create('div','detail-zoom-control');
+  panel.innerHTML='<span id="detail-zoom-readout" role="status"></span><button id="detail-use-zoom" type="button">Use this zoom for details</button>';
+  L.DomEvent.disableClickPropagation(panel);L.DomEvent.disableScrollPropagation(panel);
+  panel.querySelector('button').onclick=()=>{
+   if(map.getZoom()<13)return;
+   squareLookupMinZoom=map.getZoom();
+   try{localStorage.setItem('square-detail-min-zoom',String(squareLookupMinZoom));}catch{}
+   if(squareLookupTimer){clearTimeout(squareLookupTimer);squareLookupTimer=null;}
+   squareLookupError='';scheduleSquareLookups();updateDetailZoomControl();
+  };
+  return panel;
+ };
+ control.addTo(map);updateDetailZoomControl();
+}
+function startSquareRefresh(cell){
+ if(!squareRefreshLayers){
+  const pane=map.createPane('square-refresh');pane.style.zIndex='450';pane.style.pointerEvents='none';
+  squareRefreshRenderer=L.svg({pane:'square-refresh'}).addTo(map);
+  squareRefreshLayers=L.layerGroup().addTo(map);
+ }
+ let entry=refreshingSquares.get(cell.cell_id);
+ if(entry)entry.count++;
+ else{
+  const bounds=[[cell.south,cell.west],[cell.north,cell.east]];
+  const style={renderer:squareRefreshRenderer,pane:'square-refresh',interactive:false,fill:false};
+  const halo=L.rectangle(bounds,{...style,color:'#111827',weight:7,opacity:.9}).addTo(squareRefreshLayers);
+  const outline=L.rectangle(bounds,{...style,color:'#00e5ff',weight:3,opacity:1,dashArray:'7 5',fill:true,fillColor:'#00e5ff',fillOpacity:.12,className:'square-refresh-outline'})
+   .addTo(squareRefreshLayers).bindTooltip('Refreshing…',{permanent:true,direction:'center',className:'square-refresh-label'}).openTooltip();
+  entry={count:1,halo,outline};refreshingSquares.set(cell.cell_id,entry);
+ }
+ return ()=>{
+  entry.count--;
+  if(entry.count===0){squareRefreshLayers.removeLayer(entry.halo);squareRefreshLayers.removeLayer(entry.outline);refreshingSquares.delete(cell.cell_id);}
+ };
+}
+function squareViewportCells(){
+ if(!map||squareLookupMoving||capturedSquaresHidden||!feedMetadata?.attribution?.configured||map.getZoom()<squareLookupMinZoom)return [];
+ const bounds=map.getBounds(),now=Date.now()/1000;
+ // Unknown player matches must be checked before the player filter can hide them.
+ return board.filter(cell=>(!mapTeamFilter||cell.owner_team===mapTeamFilter)
+  &&(captureDays===0||(typeof cell.captured_at==='number'&&cell.captured_at<=now&&cell.captured_at>=now-captureDays*86400))
+  &&bounds.intersects([[cell.south,cell.west],[cell.north,cell.east]]));
+}
+function squareLookupCandidates(){
+ if(!automaticSquareRefreshEnabled)return [];
+ const visible=squareViewportCells();
+ const center=map?.getCenter();
+ return visible.filter(cell=>Date.now()-(squareLookupChecks.get(squareVersion(cell))||0)>squareLookupFreshMs)
+  .sort((a,b)=>center.distanceTo([(a.south+a.north)/2,(a.west+a.east)/2])-center.distanceTo([(b.south+b.north)/2,(b.west+b.east)/2]));
+}
+function scheduleSquareLookups(){
+ if(!automaticSquareRefreshEnabled){renderSquareLookupStatus(0);return;}
+ if(document.hidden)return;
+ const candidates=squareLookupCandidates();
+ renderSquareLookupStatus(candidates.length);
+ if(squareLookupBusy||squareLookupTimer||squareLookupMoving)return;
+ if(!candidates.length){
+  const visible=squareViewportCells();
+  if(visible.length)squareLookupTimer=setTimeout(()=>{squareLookupTimer=null;scheduleSquareLookups();},squareLookupFreshMs);
+  return;
+ }
+ squareLookupTimer=setTimeout(()=>{squareLookupTimer=null;loadNextSquare();},Math.max(600,squareLookupPauseUntil-Date.now()));
+}
+function renderSquareLookupStatus(count=squareLookupCandidates().length){
+ updateDetailZoomControl();
+ let status;
+ if(!automaticSquareRefreshEnabled)status='Automatic square detail refresh is temporarily disabled. Click a square to view its API details.';
+ else if(!feedMetadata?.attribution?.configured)status='Automatic square lookups require the MeshWars API token.';
+ else if(map.getZoom()<squareLookupMinZoom)status=`Zoom in to level ${squareLookupMinZoom} or closer to load square details. Automatic lookups are paused at this zoom.`;
+ else if(capturedSquaresHidden)status='Square lookups paused while captured squares are hidden.';
+ else if(squareLookupMoving)status='Waiting for the map to stop moving…';
+ else status=squareLookupError||(count?`Updating ${count.toLocaleString()} squares in this view, nearest first. Details are cached for 5 minutes; lookups are paced to about one per second.`:'Visible square details checked. Names may remain unknown in the API. Details refresh after 5 minutes while this view remains open.');
+ $('square-lookup-status').textContent=status;
+}
+function applySquareDetail(detail){
+ const event=detail.capture_event;
+ const current=board.find(c=>c.cell_id===detail.cell_id);
+ if(!current)return;
+ const matching=detail.owner_team===current.owner_team&&detail.captured_at===current.captured_at;
+ if(matching)squareLookupChecks.set(squareVersion(current),Date.now());
+ if(event&&event.team===current.owner_team&&event.ts===current.captured_at){
+  current.captured_by=event.player;renderPlayerFilter();drawBoard();
+ }
+ if(squareLookupChecks.size>20000)squareLookupChecks.delete(squareLookupChecks.keys().next().value);
+}
+async function loadNextSquare(){
+ if(!automaticSquareRefreshEnabled)return;
+ if(document.hidden||squareLookupBusy)return;
+ const cell=squareLookupCandidates()[0];if(!cell)return;
+ const version=squareVersion(cell);
+ squareLookupBusy=true;
+ const finishHighlight=startSquareRefresh(cell);
+ try{
+  const response=await fetch('/api/cells/'+encodeURIComponent(cell.cell_id),{cache:'no-store'});
+  const detail=await response.json();if(!response.ok)throw Error(detail.error||'API lookup unavailable.');
+  // Also remember unsuccessful name lookups and stale responses: do not spin on them.
+  squareLookupChecks.set(version,Date.now());applySquareDetail(detail);
+  squareLookupError='';squareLookupPauseUntil=Date.now()+1100;
+ }catch(error){
+  squareLookupError=`Capturer lookup paused: ${error.message} Retrying in one minute.`;
+  squareLookupPauseUntil=Date.now()+60000;
+ }finally{
+  finishHighlight();squareLookupBusy=false;renderSquareLookupStatus();scheduleSquareLookups();
+ }
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)scheduleSquareLookups();});
+async function showSquareDetails(cell){
+ const finishHighlight=startSquareRefresh(cell);
+ const popup=L.popup().setLatLng([(cell.south+cell.north)/2,(cell.west+cell.east)/2]).setContent('Loading square details…').openOn(map);
+ try{
+  const response=await fetch('/api/cells/'+encodeURIComponent(cell.cell_id),{cache:'no-store'});
+  const detail=await response.json();if(!response.ok)throw Error(detail.error||'Square details unavailable.');
+  applySquareDetail(detail);
+  const scores=detail.scores&&typeof detail.scores==='object'?Object.entries(detail.scores).map(([team,value])=>`${escape(team)}: ${escape(value)}`).join('<br>'):'Unavailable';
+  popup.setContent(`<strong>${escape(detail.cell_id)}</strong><p>Owner: ${escape(detail.owner_team)}<br>Captured by: ${escape(detail.captured_by||'Unknown')}<br>${detail.captured_at?'Captured: '+escape(new Date(detail.captured_at*1000).toLocaleString()):'Capture time unavailable'}</p><p>Defense scores<br>${scores}</p><small>MeshWars square API · checked ${escape(new Date(detail.checked_at*1000).toLocaleTimeString())}. Names require an exact match to the current capture event.</small>`);
+ }catch(error){popup.setContent(escape(error.message));}
+ finally{finishHighlight();}
 }
 async function refreshRadioCoverage(){
  try{
@@ -736,13 +892,31 @@ function renderTeamScores(){
  source.title=liveScores?`Meshtastic scoreboard: squares held plus check-in and exploration points. Checked ${scores.last_success?new Date(scores.last_success*1000).toLocaleString():'at an unknown time'}. Map filters do not change totals. Squares held are current territory, not all-time capture events.`:
   'The scoreboard feed has not loaded. Points remain unknown; territory counts use the loaded board. Map filters do not change totals.';
 }
+function renderPlayerFilter(){
+ const names=new Map();
+ for(const p of playerRoster?.players||[])names.set(p.name.toLocaleLowerCase(),{name:p.name,team:p.team});
+ for(const cell of board)if(cell.captured_by&&!names.has(cell.captured_by.toLocaleLowerCase()))names.set(cell.captured_by.toLocaleLowerCase(),{name:cell.captured_by});
+ if(mapPlayerFilter&&mapPlayerFilter!=='__unknown__'&&!names.has(mapPlayerFilter.toLocaleLowerCase()))names.set(mapPlayerFilter.toLocaleLowerCase(),{name:mapPlayerFilter});
+ $('player-filter').innerHTML='<option value="">All players</option><option value="__unknown__">Unknown capturer</option>'+[...names.values()].sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<option value="${escape(p.name)}">${escape(p.name)}${p.team?' · '+escape(p.team):''}</option>`).join('');
+ $('player-filter').value=mapPlayerFilter;
+ const known=board.filter(c=>c.captured_by).length,meta=feedMetadata?.attribution;
+ $('player-filter-status').textContent=`${playerRoster?.players?.length||0} registered players · ${known.toLocaleString()} of ${board.length.toLocaleString()} squares have a confirmed capturer. ${meta?.configured?'':'Capture attribution needs a configured API token. '}${meta?.error||''} ${playerRoster?.stale?'Roster is cached. ':''}${playerRoster?.error||''}`;
+}
+$('player-filter').onchange=()=>{mapPlayerFilter=$('player-filter').value;drawBoard();};
+async function refreshPlayers(){
+ try{
+  const response=await fetch('/api/players',{cache:'no-store'});if(!response.ok)throw Error();
+  playerRoster=await response.json();
+ }catch{playerRoster={...(playerRoster||{}),stale:true,error:'Player roster unavailable; known capture names remain selectable.'};}
+ renderPlayerFilter();
+}
 function renderFeedStatus(){
- renderTeamScores();
+ renderTeamScores();renderPlayerFilter();
  if(!feedMetadata)return;
  const meta=feedMetadata;
  const stamp=value=>value?new Date(value*1000).toLocaleString():'not yet';
  const state=meta.refreshing?'Refreshing MeshWars…':meta.stale?'Using fallback data':'Live feed';
- $('board-feed-status').textContent=`${state} · ${meta.coverage_count.toLocaleString()} squares. Last successful check: ${stamp(meta.last_success)}. Last attempt: ${stamp(meta.last_checked)}. Automatic check interval: ${meta.error?meta.retry_interval:meta.refresh_interval}s. ${meta.error||meta.cache_error||''}`;
+ $('board-feed-status').textContent=`${state} · ${meta.coverage_count.toLocaleString()} squares. Last successful check: ${stamp(meta.last_success)}. Last attempt: ${stamp(meta.last_checked)}. Automatic check interval: ${meta.error?meta.retry_interval:meta.refresh_interval}s. ${meta.error||meta.cache_error||''} ${meta.board_endpoint==='authenticated-api'?'Authenticated API board. ':''}${meta.data_warning||''}`;
  document.querySelector('.board-feed').dataset.stale=String(meta.stale);
  $('board-route-warning').hidden=!(result && result.board_revision && result.board_revision!==boardRevision);
 }
@@ -941,6 +1115,85 @@ function updateTeam(){
  if(boardAvailable)$('status').textContent=`Team ${team} selected. Run a new search to plan for this team.`;
 }
 $('team').onchange=updateTeam;
+const driveStorageKey='meshwars-drives-v1';
+let driveState={player:'',node:'',current:null,history:[]},driveConfigured=false,driveBusy=false;
+try{
+ const saved=JSON.parse(localStorage.getItem(driveStorageKey)||'null');
+ if(saved&&typeof saved.player==='string'&&typeof saved.node==='string'&&Array.isArray(saved.history))driveState=saved;
+}catch{}
+$('drive-player').value=driveState.player;$('drive-node').value=driveState.node;
+function saveDriveState(){
+ try{localStorage.setItem(driveStorageKey,JSON.stringify(driveState));return true;}
+ catch{$('drive-status').textContent='Browser storage unavailable. Keep this page open; session changes may not survive a reload.';return false;}
+}
+function renderDriveReport(){
+ const session=driveState.current,report=session?.report;
+ const active=!!session&&!session.ended_at;
+ $('drive-start').disabled=driveBusy||active||!driveConfigured;
+ $('drive-end').disabled=driveBusy||!active;
+ $('drive-refresh').disabled=driveBusy||!session?.ended_at||!driveConfigured;
+ $('drive-download').disabled=driveBusy||!report;
+ $('drive-player').disabled=driveBusy||active;$('drive-node').disabled=driveBusy||active;
+ $('drive-report').innerHTML=session?`<p>${escape(session.player)} · ${escape(session.node)}<br>Started ${escape(new Date(session.started_at*1000).toLocaleString())}${session.ended_at?`<br>Ended ${escape(new Date(session.ended_at*1000).toLocaleString())}`:' · In progress'}</p>`:'';
+ if(report)$('drive-report').innerHTML+=`<strong>${report.unique_squares} unique squares captured</strong><p>${report.capture_events} capture events: ${report.unclaimed_capture_events} unclaimed, ${report.enemy_capture_events} taken from opponents.</p><p>Place points: unavailable<br>Defense points: unavailable<br>Total earned points: unavailable</p>${report.feed_limit_reached?'<p class="route-input-error">Feed limit reached: captures may be missing. Treat these counts as a lower bound.</p>':''}<p class="fine">Checked ${escape(new Date(report.checked_at*1000).toLocaleString())}. ${escape(report.notice)}</p><details><summary>Captured squares</summary><ul>${report.events.map(event=>`<li>${escape(event.cell_id)} · ${escape(new Date(event.ts*1000).toLocaleTimeString())} · ${escape(event.team)}${event.from_team?` from ${escape(event.from_team)}`:' from unclaimed'}</li>`).join('')}</ul></details>`;
+ $('drive-history').innerHTML=driveState.history.length?driveState.history.map((entry,i)=>`<button type="button" data-drive-history="${i}" ${driveBusy||active?'disabled':''}>${escape(new Date(entry.started_at*1000).toLocaleString())} · ${escape(entry.player)} · ${entry.report?entry.report.unique_squares+' squares':'not checked'}</button>`).join(''):'No previous drives.';
+ document.querySelectorAll('[data-drive-history]').forEach(button=>button.onclick=()=>{
+  if(driveBusy||driveState.current&&!driveState.current.ended_at)return;
+  const index=Number(button.dataset.driveHistory),entry=driveState.history.splice(index,1)[0];
+  if(driveState.current)driveState.history.unshift(driveState.current);
+  driveState.current=entry;saveDriveState();renderDriveReport();
+ });
+}
+async function driveRequest(path,data){
+ const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+ const result=await response.json();if(!response.ok)throw Error(result.error||'Drive request failed.');return result;
+}
+async function refreshDriveReport(){
+ if(driveBusy||!driveState.current?.ended_at)return;
+ driveBusy=true;renderDriveReport();$('drive-status').textContent='Checking recorded Meshtastic captures…';
+ try{
+  const {player,node,started_at,ended_at}=driveState.current;
+  driveState.current.report=await driveRequest('/api/drives/report',{player,node,started_at,ended_at});
+  $('drive-status').textContent='Report updated. Refresh later for delayed events; responses may be cached for 30 seconds.';
+  saveDriveState();
+ }catch(error){$('drive-status').textContent=error.message+' Session retained; you can retry.';}
+ finally{driveBusy=false;renderDriveReport();}
+}
+$('drive-start').onclick=async()=>{
+ if(driveBusy||driveState.current&&!driveState.current.ended_at)return;
+ driveBusy=true;renderDriveReport();$('drive-status').textContent='Verifying your player and registered node…';
+ try{
+  const session=await driveRequest('/api/drives/start',{player:$('drive-player').value.trim(),node:$('drive-node').value.trim()});
+  if(driveState.current)driveState.history.unshift(driveState.current);
+  driveState.history=driveState.history.slice(0,20);driveState.current=session;
+  driveState.player=session.player;driveState.node=session.node;
+  $('drive-status').textContent='Drive started. End it when you arrive; no GPS recording or background browser operation is required.';
+  saveDriveState();
+ }catch(error){$('drive-status').textContent=error.message;}
+ finally{driveBusy=false;renderDriveReport();}
+};
+$('drive-end').onclick=async()=>{
+ if(driveBusy||!driveState.current||driveState.current.ended_at)return;
+ driveState.current.ended_at=Date.now()/1000;saveDriveState();renderDriveReport();await refreshDriveReport();
+};
+$('drive-refresh').onclick=refreshDriveReport;
+$('drive-download').onclick=()=>{
+ const report=driveState.current?.report;if(!report)return;
+ const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
+ const link=document.createElement('a');link.href=url;link.download='meshwars-drive-report.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+async function initDriveTracker(){
+ try{
+  const response=await fetch('/api/drives/status');if(!response.ok)throw Error();
+  const status=await response.json();driveConfigured=status.configured===true;
+  if(!driveState.player)$('drive-player').value=status.player||'';
+  if(!driveState.node)$('drive-node').value=status.node||'';
+  $('drive-status').textContent=driveConfigured?(driveState.current&&!driveState.current.ended_at?'Drive in progress. End it when you arrive.':'Ready. Enter your registered player name and node ID.'): 'Set MESHWARS_API_KEY in the server environment and restart to enable drive reports.';
+ }catch{$('drive-status').textContent='Drive integration unavailable. Existing sessions are retained.';}
+ if(driveState.current&&!driveState.current.ended_at)$('sidebar-drive').open=true;
+ renderDriveReport();
+}
+initDriveTracker();
 const savedTripsKey='meshwars-saved-trips-v1';
 let savedTrips=[];
 try{const data=JSON.parse(localStorage.getItem(savedTripsKey)||'[]');if(Array.isArray(data))savedTrips=data.filter(t=>t&&typeof t.id==='string'&&typeof t.name==='string'&&Array.isArray(t.stops)&&t.stops.length>=2&&t.stops.length<=10).slice(0,30);}catch{}
@@ -999,6 +1252,7 @@ async function init(){
  if(!window.L){$('status').textContent='Map library could not load. Check access to unpkg.com and reload.';$('submit').disabled=true;return;}
  map=L.map('map',{preferCanvas:true}).setView([40.6,-111.9],10);
  initCurrentLocation();
+ initDetailZoomControl();
  const progressControl=L.control({position:'topright'});
  progressControl.onAdd=()=>{
   const panel=$('search-progress');
@@ -1016,7 +1270,12 @@ async function init(){
  radioLayer=L.layerGroup().addTo(map);
  bonusPlacesLayer=L.layerGroup().addTo(map);
  updateTeam();
- map.on('moveend',drawBoard);
+ map.on('movestart zoomstart',()=>{
+  squareLookupMoving=true;
+  if(squareLookupTimer){clearTimeout(squareLookupTimer);squareLookupTimer=null;}
+  renderSquareLookupStatus();
+ });
+ map.on('moveend',()=>{squareLookupMoving=false;drawBoard();});
  map.on('moveend',drawRadioCoverage);
  map.on('contextmenu',e=>{
   if(areaDrawing?.kind!=='polygon')return;
@@ -1050,9 +1309,9 @@ async function init(){
  });
  ['start','end'].forEach(id=>$(id).addEventListener('change',updateMarkers));
  $('submit').disabled=true;
- await Promise.allSettled([refreshBoard(true),refreshRadioCoverage()]);
+ await Promise.allSettled([refreshBoard(true),refreshRadioCoverage(),refreshPlayers()]);
  $('status').textContent=boardAvailable?'Choose start and destination to plan a drive.':'Waiting for capture data; automatic checks will continue.';
- setInterval(()=>{refreshBoard();refreshRadioCoverage();},30*60*1000);
+ setInterval(()=>{refreshBoard();refreshRadioCoverage();refreshPlayers();},30*60*1000);
 }
 function setSearching(active){
  searching=active;
@@ -1164,7 +1423,7 @@ $('planner').addEventListener('submit',async e=>{
  }finally{
   if(timer)clearInterval(timer);
   searchController=null;setSearching(false);
-  if(invalidStop)$(invalidStop)?.focus();
+  if(invalidStop){revealSidebarControl($(invalidStop));$(invalidStop)?.focus();}
  }
 });
 $('print').onclick=()=>window.print();

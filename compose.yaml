@@ -10,6 +10,10 @@ services:
       - "127.0.0.1:${PLANNER_PORT:-8000}:8000"
     environment:
       DATA_DIR: /data
+      MESHWARS_API_KEY: ${MESHWARS_API_KEY:-}
+      MESHWARS_PLAYER_NAME: ${MESHWARS_PLAYER_NAME:-}
+      MESHWARS_NODE_ID: ${MESHWARS_NODE_ID:-}
+      MESHWARS_API_URL: ${MESHWARS_API_URL:-https://meshwars.com/api/v1}
       BOARD_PATH: ${BOARD_PATH:-/data/seed-board.json}
       MESHWARS_PLACES_URL: ${MESHWARS_PLACES_URL:-https://meshwars.com/api/places}
       MESHWARS_SCORES_URL: ${MESHWARS_SCORES_URL:-https://meshwars.com/scores}
