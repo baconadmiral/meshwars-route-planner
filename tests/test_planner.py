@@ -212,7 +212,8 @@ class BeamSearchTests(unittest.TestCase):
         with patch('planner.exploration_points',return_value=[]):
             result=search_routes([.001,.001],[.014,.001],[],100,router,strategy='beam')
         self.assertLessEqual(result['stats']['refinement_requests'],72)
-        self.assertLessEqual(len(calls),73)
+        self.assertLessEqual(len(calls),85)  # baseline, up to 72 local checks, 12 wild probes
+        self.assertLessEqual(result['stats']['wild_search_requests'],12)
         self.assertGreaterEqual(result['routes'][0]['target_count'],result['baseline']['target_count'])
 
     def test_zero_budget_comparison_makes_one_shared_request(self):
@@ -307,7 +308,7 @@ class ParallelRoutingTests(unittest.TestCase):
             with lock:calls.append(points)
             if len(points)>2:time.sleep(.02)
             return [route(points)]
-        with patch('planner.exploration_points',return_value=[target]*4),patch('planner.insertion_proposals',return_value=[]):
+        with patch('planner.exploration_points',return_value=[target]*4),patch('planner.insertion_proposals',return_value=[]),patch('planner.wild_detours',return_value=[]):
             result=search_routes(start,end,[],60,router,workers=4)
         self.assertEqual(len(calls),2)
         self.assertEqual(result['total_provider_requests'],2)

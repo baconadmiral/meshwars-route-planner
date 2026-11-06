@@ -25,6 +25,45 @@ class HostingTests(unittest.TestCase):
         self.client=self.app.test_client()
         self.payload={'start':[.001,.001],'end':[.01,.001],'detour_minutes':0,'team':'ORANGE'}
 
+    def test_mission_mode_validation_and_forwarding(self):
+        for endpoint in ('/api/plan','/api/plan-stream'):
+            for mode in ('offensive','fortify','frontier','flanking','supply'):
+                with patch('hosting.fetch_routes',side_effect=lambda points,*args:[route(points)]):
+                    response=self.client.post(endpoint,json={**self.payload,'mission_mode':mode})
+                self.assertEqual(response.status_code,200)
+                data=response.get_json() if endpoint.endswith('/plan') else json.loads(response.data.splitlines()[-1])
+                self.assertEqual(data['mission_mode'],mode)
+                self.assertEqual(data['mission']['id'],mode)
+            from places import current_week
+            self.runtime.places=SimpleNamespace(load=lambda *args:{'available':True,'week_start':current_week(),'places':[{'id':1,'name':'Test landmark','type':'landmark','lat':.001,'lon':.005,'points':5,'rotates':True}]})
+            with patch('hosting.fetch_routes',side_effect=lambda points,*args:[route(points)]):
+                response=self.client.post(endpoint,json={**self.payload,'mission_mode':'special_ops'})
+            self.assertEqual(response.status_code,200)
+            data=response.get_json() if endpoint.endswith('/plan') else json.loads(response.data.splitlines()[-1])
+            self.assertEqual(data['mission_mode'],'special_ops')
+            self.assertGreater(data['routes'][0]['place_bonus'],0)
+            with patch('hosting.fetch_routes') as fetch:
+                response=self.client.post(endpoint,json={**self.payload,'mission_mode':'invalid'})
+            self.assertEqual(response.status_code,400)
+            fetch.assert_not_called()
+
+    def test_blocked_roads_validate_and_reach_both_search_endpoints(self):
+        blocked=[{'coordinates':[[.005,-.001],[.005,.003]],'buffer_meters':20}]
+        payload={**self.payload,'blocked_roads':blocked}
+        safe=route([[.001,.001],[.001,.004],[.01,.004],[.01,.001]])
+        for endpoint in ('/api/plan','/api/plan-stream'):
+            with patch('hosting.fetch_routes',return_value=[safe]):
+                response=self.client.post(endpoint,json=payload)
+            self.assertEqual(response.status_code,200)
+            data=response.get_json() if endpoint.endswith('/plan') else json.loads(response.data.splitlines()[-1])
+            self.assertEqual(data['blocked_roads'],blocked)
+            with patch('hosting.fetch_routes') as fetch:
+                response=self.client.post(endpoint,json={**payload,'start':[.005,.001]})
+            self.assertEqual(response.status_code,400)
+            self.assertIn('Start (A)',response.get_json()['error'])
+            fetch.assert_not_called()
+        self.assertEqual(self.client.post('/api/validate-route-area',json={**payload,'blocked_roads':[{}]}).status_code,400)
+
     def test_square_api_updates_board_attribution(self):
         self.runtime.square_api=Mock()
         detail={'cell_id':'0_0','captured_by':'🥓','capture_event':{'cell_id':'0_0','ts':100,'team':'BLUE','player':'🥓'}}

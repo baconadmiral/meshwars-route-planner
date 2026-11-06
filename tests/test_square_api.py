@@ -7,7 +7,7 @@ from unittest.mock import patch
 from urllib.error import URLError
 
 from board_feed import BoardFeed, merge_api_board
-from square_api import SquareAPI, capture_from_cell
+from square_api import SquareAPI, capture_from_cell, normalize_evidence_summary
 
 
 def cell(**changes):
@@ -34,6 +34,17 @@ class SquareAPITests(unittest.TestCase):
         self.assertNotIn('secret',json.dumps(detail))
         for invalid in ('../players','0_0?x=1','0_0/extra'):
             with self.assertRaises(ValueError):api.cell(invalid)
+
+    def test_square_evidence_is_sanitized_without_inventing_failures(self):
+        evidence={'verified_tx_count':4,'passive_rx_count':2,'other_count':0,'max_watcher_count':3,'private_node':'omit'}
+        api=SquareAPI('secret')
+        with patch.object(api.client,'_get',return_value={'cell':cell(evidence_summary=evidence)}):
+            result=api.cell('0_0')
+        self.assertEqual(result['evidence_summary']['verified_tx_count'],4)
+        self.assertNotIn('private_node',result['evidence_summary'])
+        self.assertIsNone(normalize_evidence_summary({'verified_tx_count':True,'passive_rx_count':-1}))
+        self.assertEqual(normalize_evidence_summary({'verified_tx_count':0})['verified_tx_count'],0)
+        self.assertNotIn('failed',result['evidence_summary'])
 
     def test_uncached_requests_are_paced_and_cache_hits_skip_wait(self):
         api=SquareAPI('secret')

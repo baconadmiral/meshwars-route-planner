@@ -218,7 +218,7 @@ def create_app(runtime, search_limit=2):
             result = search_routes(start, end, snapshot['coverage'], budget, fetch_routes,
                                    progress=progress, strategy=strategy, workers=ROUTING_WORKERS,
                                    waypoints=via, team=team, allowed_bounds=bounds,
-                                   places_loader=places_feed.load if places_feed else None,place_options=bonus_options)
+                                   places_loader=places_feed.load if places_feed else None,place_options=bonus_options,blocked_roads=body.get('blocked_roads'),mission_mode=body.get('mission_mode','balanced'))
             annotate_routes(result, radio_snapshot)
             result['board_revision'] = snapshot.get('revision')
             return result

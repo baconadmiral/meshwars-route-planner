@@ -22,6 +22,15 @@ def capture_from_cell(cell):
     return None
 
 
+def normalize_evidence_summary(value):
+    if not isinstance(value,dict):return None
+    result={}
+    for key in ('verified_tx_count','passive_rx_count','other_count','max_watcher_count'):
+        count=value.get(key)
+        result[key]=count if type(count) is int and count>=0 else None
+    return result if any(v is not None for v in result.values()) else None
+
+
 class SquareAPI:
     def __init__(self,key=None,api_url='https://meshwars.com/api/v1'):
         self.client=DriveReports(key,api_url)
@@ -48,7 +57,7 @@ class SquareAPI:
             result={'cell_id':cell_id,'owner_team':cell['owner_team'],
                     'captured_at':cell.get('captured_at'),'last_report_ts':cell.get('last_report_ts'),
                     'scores':cell.get('scores'),'captured_by':event['player'] if event else None,
-                    'capture_event':event,'checked_at':now,'source':'meshwars-api'}
+                    'capture_event':event,'evidence_summary':normalize_evidence_summary(cell.get('evidence_summary')),'checked_at':now,'source':'meshwars-api'}
             if len(self._cache)>=512:self._cache.pop(next(iter(self._cache)))
             self._cache[cell_id]=result
             return result

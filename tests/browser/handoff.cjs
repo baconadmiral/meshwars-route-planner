@@ -13,7 +13,7 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
  const browser=await chromium.launch({headless:true});
  try{
   for(const scenario of [{name:'no-area',area:null},{name:'box',area:box},
-      {name:'polygon',area:polygon},{name:'place-bonus',area:box,bonus:true},{name:'mobile-polygon',area:polygon,mobile:true},
+      {name:'polygon',area:polygon},{name:'mission-fortify',area:null,mission:'fortify'},{name:'wild-routes',area:null,wild:true},{name:'place-bonus',area:box,bonus:true},{name:'mobile-polygon',area:polygon,mobile:true},
       {name:'preview-unavailable',area:box,failPreview:true}]){
    const page=await browser.newPage({viewport:scenario.mobile?{width:390,height:844}:{width:1280,height:1000}});
    page.setDefaultTimeout(5000);
@@ -30,13 +30,13 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
      if(url.pathname.endsWith('qrcode.js'))return intercepted.fulfill({contentType:'application/javascript',body:fs.readFileSync(require.resolve('qrcode-generator'))});
      if(url.pathname.endsWith('.png'))return intercepted.fulfill({contentType:'image/png',body:blankTile});
     }
-    if(url.pathname==='/api/board'||url.pathname==='/api/board/status')return reply({available:true,coverage:[],coverage_count:0,source:'fixture',revision:'1',refresh_interval:1800,attribution:{configured:false}});
+    if(url.pathname==='/api/board'||url.pathname==='/api/board/status')return reply({available:true,coverage:scenario.mission?[{cell_id:'0_0',owner_team:'BLUE',south:0,west:0,north:.0027,east:.00384,scores:{BLUE:0}}]:[],coverage_count:scenario.mission?1:0,source:'fixture',revision:'1',refresh_interval:1800,attribution:{configured:false}});
     if(url.pathname.startsWith('/api/cells/'))squareDetailRequests++;
     if(url.pathname==='/api/cells/0_3')return reply({cell_id:'0_3',owner_team:'RED',captured_at:300,captured_by:'Automatic player',scores:{RED:1},checked_at:Date.now()/1000,capture_event:{cell_id:'0_3',ts:300,team:'RED',player:'Automatic player'}});
     if(url.pathname==='/api/cells/0_2'){
      if(holdSquareRequest)await new Promise(resolve=>{releaseSquareRequest=resolve;});
      if(failSquareRequest)return intercepted.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'Test square lookup failure'})});
-     return reply({cell_id:'0_2',owner_team:'BLUE',captured_at:200,captured_by:'Older player',scores:{BLUE:2},checked_at:Date.now()/1000,capture_event:{cell_id:'0_2',ts:200,team:'BLUE',player:'Older player'}});
+     return reply({cell_id:'0_2',owner_team:'BLUE',captured_at:200,captured_by:'Older player',scores:{BLUE:2},evidence_summary:{verified_tx_count:4,passive_rx_count:1,other_count:0,max_watcher_count:2},checked_at:Date.now()/1000,capture_event:{cell_id:'0_2',ts:200,team:'BLUE',player:'Older player'}});
     }
     if(url.pathname.startsWith('/api/cells/'))return reply({cell_id:url.pathname.split('/').at(-1),owner_team:'BLUE',captured_at:null,captured_by:null,capture_event:null,checked_at:Date.now()/1000});
     if(url.pathname==='/api/players')return reply({available:true,configured:true,players:[{name:'🥓',team:'BLUE'},{name:'Other <player>',team:'RED'}]});
@@ -58,25 +58,36 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
    });
    await page.goto('http://localhost:8000/');
    await page.waitForFunction(()=>typeof map!=='undefined'&&map&&typeof radioLayer!=='undefined'&&radioLayer);
+   assert.ok(await page.evaluate(()=>map.getSize().y)>100,'Map must have a usable rendered height');
+   assert.ok(await page.evaluate(()=>[...document.styleSheets].find(sheet=>sheet.href?.endsWith('/style.css'))?.cssRules.length)>20,'App stylesheet must parse as CSS');
    assert.equal(await page.locator('#team').isVisible(),true);
    assert.equal(await page.locator('#saved-trip').isVisible(),true);
    assert.equal(await page.locator('#start').isVisible(),true);
    assert.equal(await page.locator('#end').isVisible(),true);
    assert.equal(await page.locator('#budget').isVisible(),true);
    assert.equal(await page.locator('#capture-days').isVisible(),true);
+   assert.equal(await page.locator('#mission-mode option').count(),6);
+   assert.equal(await page.locator('#mission-mode').isVisible(),true);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),true);
    assert.equal(await page.locator('#drive-player').isVisible(),false);
    assert.equal(await page.locator('#player-filter').isVisible(),false);
    assert.equal(await page.locator('#strategy').isVisible(),false);
    if(scenario.name==='no-area'){
     const sidebarOutput=path.join(__dirname,'test-results');fs.mkdirSync(sidebarOutput,{recursive:true});
     await page.screenshot({path:path.join(sidebarOutput,'sidebar-planning.png')});
+    await page.emulateMedia({colorScheme:'light'});
+    await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');
+    await page.screenshot({path:path.join(sidebarOutput,'tactical-light.png')});
+    await page.emulateMedia({colorScheme:'dark'});
+    await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
+
     await page.locator('[data-sidebar-target="sidebar-map"]').click();
     assert.equal(await page.locator('#player-filter').isVisible(),true);
     await page.locator('[data-sidebar-target="sidebar-plan"]').click();
     console.log('Passed sidebar layout: primary planning controls visible, secondary tools collapsed, shortcuts open sections.');
    }
 
-   await page.evaluate(({route,area,failPreview,bonus})=>{
+   await page.evaluate(({route,area,failPreview,bonus,wild,mission})=>{
     result={routes:[route],baseline:route,team:'BLUE',strategy:'beam',allowed_bounds:area};
     if(bonus){
      const place={id:42,name:'Test landmark',type:'landmark',lat:.001,lon:.01,points:25,rotates:true};
@@ -84,12 +95,37 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
      route.place_bonus=25;route.place_count=1;route.bonus_places=[place];route.capture_value=33;
     }
     route.territory_value=8;route.territory_breakdown={easy_enemy:3,defended_enemy:0,unknown_enemy:0,unpainted:5};
+    if(mission){
+     $('mission-mode').value=mission;updateMissionMode(false);
+     Object.assign(route,{mission_mode:mission,mission_territory_value:3,mission_place_value:0,mission_place_multiplier:0,mission_multiplier:1,mission_breakdown:[{label:'Friendly reinforcement',count:1,priority:3}],mission_target_ids:['0_0'],mission_target_count:1,reinforcement_ids:['0_0'],reinforcement_count:1,capture_value:3,target_count:0,enemy_count:0,unmapped_count:0,easy_enemy_count:0,hard_enemy_count:0,unknown_score_count:0,square_count:1});
+     result.mission={id:mission,name:'Fortify',description:'Reinforce low-score friendly squares.'};result.mission_mode=mission;
+    }
+    if(wild)result.routes=Array.from({length:6},(_,i)=>({...route,route_kind:i<3?'standard':'wild',wild_direction:i>=3?'Starts away from destination':undefined,budget_used_fraction:.8}));
     tripLabels={start:'A',end:'B',waypoints:[]};
     showActiveResult();
     if(failPreview)drawHandoffPreview=()=>{throw Error('Simulated preview failure');};
-   },{route:fixture.route,area:scenario.area,failPreview:scenario.failPreview,bonus:scenario.bonus});
-   assert.match(await page.locator('.route-value').innerText(),/territory priority/);
-   assert.equal(await page.locator('.route-value tbody tr').count(),4);
+   },{route:fixture.route,area:scenario.area,failPreview:scenario.failPreview,bonus:scenario.bonus,wild:scenario.wild,mission:scenario.mission});
+   if(scenario.wild){
+    assert.equal(await page.locator('.card').count(),6);
+    assert.match(await page.locator('.card').first().innerText(),/Best standard BLUE opportunity/);
+    for(let i=3;i<6;i++)assert.match(await page.locator('.card').nth(i).innerText(),new RegExp(`Wild route ${i-2}`));
+    assert.match(await page.locator('.card').nth(3).innerText(),/Starts away from destination/);
+    assert.match(await page.locator('.card').nth(3).innerText(),/80% of extra-time budget/);
+    await page.locator('[data-route="3"]').click();
+    assert.equal(await page.locator('[data-route="3"]').getAttribute('aria-pressed'),'true');
+    console.log('Passed standard/wild route grouping, loop explanation, budget use and alternative selection.');
+   }
+   assert.match(await page.locator('.route-value').innerText(),scenario.mission?/Mission priority breakdown/:/territory priority/);
+   assert.equal(await page.locator('.route-value tbody tr').count(),scenario.mission?1:4);
+   if(scenario.mission){
+    assert.match(await page.locator('.mission-brief').innerText(),/Fortify/);
+    assert.match(await page.locator('.card').innerText(),/1 reinforcement targets/);
+    assert.match(await page.locator('.route-value').innerText(),/Reinforcing friendly territory does not immediately add a square-held point/);
+    assert.equal(await page.evaluate(()=>targets.getLayers()[0].options.color),'#d79d24');
+    const missionOutput=path.join(__dirname,'test-results');fs.mkdirSync(missionOutput,{recursive:true});
+    await page.screenshot({path:path.join(missionOutput,'fortify-mode.png')});
+    console.log('Passed Fortify briefing, reinforcement counters, objective breakdown and amber targets.');
+   }
    assert.equal(await page.evaluate(()=>Object.keys(colors).every(team=>routeColor(team)!==colors[team])),true);
    assert.equal(await page.evaluate(()=>routeLayer.getLayers().at(-1).getLayers()[0].options.color),await page.evaluate(()=>routeColor(result.team)));
    await page.waitForFunction(()=>boardAvailable);
@@ -98,6 +134,7 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
     await page.evaluate(()=>{
      board=['BLUE','RED','BLUE','RED','GREEN','UNRECOGNIZED'].map((team,i)=>({
       owner_team:team,cell_id:`0_${i}`,west:i*.00384,east:(i+1)*.00384,south:0,north:.0027,scores:{[team]:1}}));
+     map.setView([.001,.011],14,{animate:false});
      board[0].captured_by='🥓';board[1].captured_by='Other <player>';
      feedMetadata.attribution={configured:true,partial:true};renderPlayerFilter();
      feedMetadata.stale=true;
@@ -120,7 +157,9 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
     assert.equal(await page.evaluate(()=>result.routes[0].capture_value),8);
     console.log('Passed player filter: Unicode roster, unknown names, escaped tooltips, team intersection, unchanged route value.');
     holdSquareRequest=true;
-    await page.evaluate(()=>{board[2].captured_at=200;territories.getLayers()[2].fire('click');});
+    await page.evaluate(()=>{map.stop();map.setView([.001,.01],15,{animate:false});board[2].captured_at=200;showSquareDetails(board[2]);});
+    await page.locator('.square-refresh-outline').waitFor({state:'attached'});
+
     await page.locator('.square-refresh-outline').waitFor();
     assert.equal(await page.locator('.square-refresh-label').innerText(),'Refreshing…');
     await page.evaluate(()=>drawBoard());
@@ -134,6 +173,13 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
     await page.waitForFunction(()=>refreshingSquares.size===0);
     assert.equal(await page.locator('.square-refresh-outline').count(),0);
     assert.equal(await page.evaluate(()=>board[2].captured_by),'Older player');
+    assert.match(await page.locator('.leaflet-popup-content').filter({hasText:'Older player'}).innerText(),/Verified TX reports: 4/);
+    await page.locator('[data-sidebar-target="sidebar-data"]').click();
+    assert.match(await page.locator('#mesh-evidence-counts').innerText(),/Verified TX evidence\s+1 squares/);
+    assert.match(await page.locator('#mesh-evidence-status').innerText(),/1 squares inspected/);
+    assert.equal(await page.evaluate(()=>squareEvidenceDetails({evidence_summary:{verified_tx_count:0,passive_rx_count:0,other_count:0,max_watcher_count:null}}).includes('Coverage unknown')),true);
+    console.log('Passed MeshWars signal intel: square summary, inspected-square counts and zero evidence remains unknown.');
+
     await page.selectOption('#player-filter','Older player');
     assert.equal(await page.evaluate(()=>board.filter(c=>captureVisible(c)).length),1);
     assert.equal(await page.locator('#start').inputValue(),'');
@@ -259,8 +305,23 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
      allowedBounds=area;excludedPlaceIds=new Set([42]);placeScoringWeek='2026-11-04';
     },{area:polygon});
     await page.locator('#place-options > summary').click();
+    await page.selectOption('#mission-mode','fortify');
     await page.fill('#budget','25');await page.fill('#place-remaining','50');
     await page.locator('#saved-trip-manage > summary').click();
+    await page.locator('#area-options > summary').click();
+    await page.locator('#draw-blocked-road').click();
+    await page.evaluate(()=>{
+     map.fire('click',{latlng:L.latLng(.005,.006)});
+     map.fire('click',{latlng:L.latLng(.006,.007)});
+    });
+    assert.equal(await page.locator('#finish-blocked-road').isDisabled(),false);
+    await page.evaluate(()=>map.fire('contextmenu',{originalEvent:{preventDefault(){},stopPropagation(){}}}));
+    assert.equal(await page.evaluate(()=>blockedRoads.length),1);
+    assert.equal(await page.evaluate(()=>blockedRoadLayer.getLayers().length),2);
+    assert.match(await page.locator('#blocked-road-status').innerText(),/1 blocked road/);
+    await page.locator('#draw-blocked-road').click();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(()=>blockedRoadDrawing),null);
     await page.fill('#trip-name','Airport loop');await page.locator('#save-trip').click();
     assert.equal(await page.locator('#saved-trip option').count(),2);
     await page.reload();await page.waitForFunction(()=>map&&markers&&boardAvailable);
@@ -271,9 +332,12 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
     assert.equal(await page.locator('#end').inputValue(),'2, 2');
     assert.equal(await page.locator('#waypoints input').inputValue(),'3, 3');
     assert.equal(await page.locator('#team').inputValue(),'RED');
+    assert.equal(await page.locator('#mission-mode').inputValue(),'fortify');
     assert.equal(await page.locator('#budget').inputValue(),'25');
     assert.equal(await page.locator('#place-remaining').inputValue(),'50');
     assert.deepEqual(await page.evaluate(()=>allowedBounds),polygon);
+    assert.equal(await page.evaluate(()=>blockedRoads.length),1);
+    assert.equal(await page.evaluate(()=>blockedRoadLayer.getLayers().length),2);
     assert.deepEqual(await page.evaluate(()=>[...excludedPlaceIds]),[42]);
     assert.equal(await page.evaluate(()=>result),null);
     await page.locator('#saved-trip-manage > summary').click();
@@ -284,6 +348,21 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
     assert.equal(await page.locator('#saved-trip option').count(),1);
     assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem(savedTripsKey)).length),0);
     console.log('Passed saved trips: persisted reload, resolved address, polygon, settings, waypoint order, update and delete.');
+    for(const mode of ['offensive','fortify','frontier','flanking','special_ops','supply']){
+     await page.selectOption('#mission-mode',mode);
+     assert.ok((await page.locator('#mission-mode-help').innerText()).length>20);
+    }
+    await page.selectOption('#mission-mode','special_ops');
+    assert.equal(await page.locator('#include-places').isChecked(),true);
+    assert.equal(await page.evaluate(()=>result),null);
+    console.log('Passed six mission choices, explanations, Special Operations settings and saved mode restoration.');
+
+    await page.locator('#area-options > summary').click();
+    await page.locator('[data-remove-road="0"]').click();
+    assert.equal(await page.evaluate(()=>blockedRoads.length),0);
+    assert.equal(await page.evaluate(()=>blockedRoadLayer.getLayers().length),0);
+    console.log('Passed blocked roads: click points, right-click finish, red marks, Escape, saved-trip restoration and removal.');
+
     await page.locator('[data-sidebar-target="sidebar-drive"]').click();
     await page.locator('#drive-start:not([disabled])').waitFor();
     assert.equal(await page.locator('#drive-player').inputValue(),'🥓');

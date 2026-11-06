@@ -348,3 +348,44 @@ A square being refreshed displays a cyan animated outline with a dark halo and a
 The sidebar prioritizes team selection, loading saved trips, and creating a route. Start, destination, extra-time budget and Search remain visible. Waypoints, route area, place bonuses and search strategy expand individually. Saving/managing trips is expandable under the always-visible saved-trip loader. Map display/filter controls, drive tracking, data/coverage and guidance are collapsed secondary sections. Plan/Saved/Map/Drive/Data shortcuts open and scroll to their sections. Loading waypoint trips reveals their stops; validation reveals hidden invalid controls. An active drive reopens its tracking section after reload. These layout changes do not reset settings or alter scoring.
 
 The frequently used **Captured in last** slider stays visible directly below team selection, separate from the expandable map display controls. It remains a display filter; route scoring still uses the full board.
+
+### Standard routes and wild loops
+
+For beam searches with extra driving time, the first three options come from the existing search unchanged. A separate bounded search adds up to three **Wild routes**, probing departures away from the destination, left/right loops, and excursions beyond the destination before returning. Twelve probes cover three distances proportional to the extra-time allowance. Candidate generation uses a conservative 8 m/s estimate; actual routed duration enforces the hard budget. Required waypoints retain their order, and both stops and complete road geometry must remain inside any selected area.
+
+Wild routes must introduce a target square or bonus place beyond the standard options and differ by at least 35% of crossed-square footprint from every retained route. Selection balances capture priority, geographic difference and budget use; it does not add game points for driving longer. Duplicate or infeasible loops are omitted rather than padding the list to six. Cards label the wild routes and show their direction and percentage of the extra-time budget used. Larger budgets expand loop reach; they are not minimum time requirements. Directional probes are deterministic rather than unseeded random choices, keeping repeat searches and tests reproducible. Greedy and zero-extra-time searches retain their existing behavior.
+
+This adds at most 12 routing probes beyond the existing beam search's 72 local refinement requests and up to 16 shared initial detours (101 provider calls including the baseline in the worst case). Compare mode reuses matching requests as before.
+
+### Blocked road sections
+
+Expand **Route area → Blocked roads**, select **Mark road on map**, and click 2–20 points along the inaccessible section. Right-click or choose Finish to commit the red mark; Escape cancels. Up to ten sections can be saved, removed individually or cleared. Saved trips preserve the marks. A fixed 20-meter buffer on each side is excluded, including any nearby crossing inside that buffer; draw tightly along the intended road. This is a geographic corridor, not a road-ID closure, so overpasses are not distinguished by elevation.
+
+Stops on blocked corridors are rejected before routing. Every proposed route, including standard and wild alternatives, is checked over its full geometry against all marks and the allowed area. If all initial baseline routes are blocked, the planner tries up to 12 bypass requests while preserving waypoint order. The fastest accessible baseline found sets the extra-time budget; this does not guarantee the globally fastest bypass. When no checked bypass works, the search returns an error asking for a guiding waypoint or adjusted marks rather than returning a blocked path. Ordinary candidate searches do not recursively launch bypass searches. Provider-call metrics include the additional baseline probes.
+
+Google Maps may recalculate through a blocked section between exported stops; check its preview. A GPX export retains the checked planned geometry. Automated fixtures cover blocked crossings, buffers, named stop errors, provider alternatives, bounded bypass failure, waypoint order, budget/boundary enforcement, both hosted endpoints, and browser drawing/saving/removal. Live road-network bypass behavior has not been verified.
+
+### Field-command theme
+
+The interface uses a tactical field-command visual theme: olive/charcoal in dark mode, field-paper neutrals in light mode, a radio-shield insignia, subtle sidebar grid, compact monospace labels, patrol/wide-sweep route cards and a tactical map badge. Team colors and contrasting navigation lines retain their meaning. Mission/patrol wording is presentation only; route calculations, capture rules and controls are unchanged. No external fonts or bitmap assets are required.
+
+### Mission modes
+
+The main sidebar offers six objectives, saved with each trip. The interface defaults to **Offensive Strike**; API requests omitting `mission_mode` retain the original `balanced` objective for compatibility. All modes obey the same actual road-duration budget, required waypoint order, allowed area and blocked-road constraints. Beam searches keep the three standard plus up to three wild alternatives; mode scoring applies to both.
+
+| Mode (`mission_mode`) | Ranking policy |
+| --- | --- |
+| Offensive Strike (`offensive`) | Enemy difficulty priority × 3; unpainted squares 0.2 each; entered place-bonus priority × 0.25. |
+| Fortify (`fortify`) | Friendly squares: 2 / (1 + owner score), or 0.25 with unknown score; × 1.5 where an enemy square shares a side. Enemy, unpainted and place bonuses contribute no mission priority. |
+| Frontier Patrol (`frontier`) | Unpainted squares sharing a side with friendly territory: 2; other unpainted: 0.15; enemy difficulty priority × 0.2; place-bonus priority × 0.25. |
+| Flanking Maneuver (`flanking`) | Standard territory priority, place-bonus priority × 0.5, then multiply the subtotal by 1 + 0.75 × the share of crossed squares outside the fastest baseline. Reserve initial probes for wider directional loops. |
+| Special Operations (`special_ops`) | Only eligible place bonuses contribute, at × 3 after the entered weight and weekly cap. Requires enabled bonuses, positive weight and a place source; unavailable/used/capped places are not invented. |
+| Supply Run (`supply`) | Standard territory and place-bonus priority, multiplied by 1 / (1 + extra driving minutes / 3). |
+
+Enemy difficulty priority remains 1 for owner scores at most 1, 1 / score² for defended squares, and 0.5 for unknown scores. Each square counts once per route. These are route-ranking weights, not game point rules or probabilities. Fortify reinforcement targets are counted separately from capture opportunities and displayed in amber; radio evidence uses mission targets. The route breakdown shows weighted contributions, place factors and time/geography modifiers. Place awards remain capped estimates, not confirmed earnings.
+
+### Signal intel from the MeshWars token
+
+A MeshWars integration token does not authorize the separate direct FreqMapper point-observation feed (`FREQMAPPER_PARTNER_TOKEN`). It can read the authenticated cell endpoint's `evidence_summary`: verified TX count, passive RX count, other report count, and maximum watcher count where provided. Clicked-square popups display those fields, and **Intel → Signal intel** summarizes up to 512 inspected squares from the current browser session. This adds no background square scan or upstream calls beyond explicit square clicks.
+
+Counts are square-level historical evidence with unspecified observation ages/history window. Passive reception does not establish transmit coverage; missing/zero evidence remains unknown rather than failed. These summaries do not feed the route's 50-meter point-proximity coverage annotation or change route priority, because exact observation locations are unavailable.

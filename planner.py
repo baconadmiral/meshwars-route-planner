@@ -1,4 +1,6 @@
 """Deterministic team opportunity scoring and bounded candidate search."""
+from road_blocks import validate_blocked_roads, validate_blocked_stops, route_blocked, find_bypass_routes
+from mission_modes import MissionCells, mission_index, validate_mission_mode, MODES
 from teams import validate_team
 from places import PlaceScorer, place_options as validate_place_options
 from route_bounds import validate_bounds, point_inside, route_inside, validate_stops
@@ -103,6 +105,7 @@ def owner_score(cell):
 
 def target_value(cell, team='BLUE'):
     """Heuristic utility, not a probability: sharply discount defended territory."""
+    if isinstance(cell,dict) and '_mission_priority' in cell:return cell['_mission_priority']
     if cell is None:
         return 1.  # Unpainted exploration; coverage remains unverified.
     if cell.get('owner_team')==team:
@@ -114,7 +117,7 @@ def target_value(cell, team='BLUE'):
 
 
 def opportunity_score(route, cells, team='BLUE', place_scorer=None):
-    known = {c['cell_id']: c for c in cells}
+    known = cells.original if isinstance(cells,MissionCells) else mission_index(cells)
     visited = route_grid_cells(route['geometry']['coordinates'])
     enemy = sorted(k for k in visited if k in known and known[k]['owner_team'] != team)
     unmapped = sorted(visited-known.keys())
@@ -130,15 +133,23 @@ def opportunity_score(route, cells, team='BLUE', place_scorer=None):
         'unpainted':float(len(unmapped)),
     }
     value+=bonus['place_bonus']*(place_scorer.weight if place_scorer else 0)
-    return dict(route, **bonus, territory_breakdown=territory_breakdown, territory_value=territory_value, square_count=len(visited), target_count=len(enemy)+len(unmapped),
+    mission=cells.score(visited,route['duration'],bonus['place_bonus'],place_scorer.weight if place_scorer else 0) if isinstance(cells,MissionCells) else {}
+    scored=dict(route, **bonus, territory_breakdown=territory_breakdown, territory_value=territory_value, square_count=len(visited), target_count=len(enemy)+len(unmapped),
                 target_ids=enemy+unmapped, enemy_count=len(enemy), unmapped_count=len(unmapped),
                 capture_value=value,easy_enemy_count=easy,hard_enemy_count=hard,
                 unknown_score_count=len(enemy)-easy-hard)
+    return dict(scored,**mission)
+
+
+def has_opportunities(route,place_weight=1):
+    if route.get('mission_mode') and route['mission_mode']!='balanced':
+        return route['capture_value']>0 and (route['mission_target_count']>0 or route['mission_place_value']>0)
+    return route['target_count']>0 or route.get('place_bonus',0)*place_weight>0
 
 
 def exploration_points(start, end, cells, budget_seconds, limit=12, team='BLUE'):
     """Explore both sides of the trip at multiple budget-dependent distances."""
-    known = {c['cell_id']: c for c in cells}
+    known = mission_index(cells)
     scale = max(.1, math.cos(math.radians((start[1]+end[1])/2)))
     center = [(start[i]+end[i])/2 for i in (0, 1)]
     direct = math.hypot((end[0]-start[0])*scale, end[1]-start[1])
@@ -205,7 +216,7 @@ def route_anchors(coords):
 
 def insertion_proposals(start, end, route, via, cells, limit=4, team='BLUE'):
     """Find missed targets near the actual road geometry and insert in trip order."""
-    known = {c['cell_id']:c for c in cells}
+    known = mission_index(cells)
     coords = route['geometry']['coordinates']
     visited = route_grid_cells(coords)
     # Bound CPU work on long trips while retaining points from the entire route.
@@ -216,7 +227,7 @@ def insertion_proposals(start, end, route, via, cells, limit=4, team='BLUE'):
         for dy in range(-2,3):
             for dx in range(-2,3):
                 cell_id=f'{row+dy}_{col+dx}'
-                if cell_id not in visited and known.get(cell_id,{}).get('owner_team') != team:
+                if cell_id not in visited and target_value(known.get(cell_id),team=team)>0:
                     candidates.add((row+dy,col+dx))
     chain = [start,*via,end]
     ranked = []
@@ -247,7 +258,7 @@ def insertion_proposals(start, end, route, via, cells, limit=4, team='BLUE'):
 
 
 def route_rank(route):
-    return (-route.get('capture_value',route['target_count']),-route['target_count'],route['duration'],route['distance'])
+    return (-route.get('capture_value',route['target_count']),-route.get('mission_target_count',route['target_count']),route['duration'],route['distance'])
 
 
 def distinct_states(states, limit):
@@ -406,7 +417,79 @@ def initial_detours(start,end,cells,budget,required, team='BLUE'):
     return result
 
 
-def route_stop_labels(via,required):
+def wild_detours(start, end, required, budget_seconds, allowed_bounds=None):
+    """Twelve bounded, directional loop probes; manual stops retain their order.
+
+    Radius grows with spare time at a conservative 8 m/s road-speed estimate.
+    The provider's actual road duration, not this estimate, enforces feasibility.
+    """
+    if budget_seconds<=0:return []
+    chain=[start,*required,end]
+    longest=max(range(len(chain)-1),key=lambda i:distance_meters(chain[i],chain[i+1]))
+    styles=[('Starts away from destination',0,-1,1),
+            ('Wide left loop',longest,0,1),
+            ('Wide right loop',longest,0,-1),
+            ('Beyond destination loop',len(chain)-2,1,-1)]
+    proposals=[]
+    seen=set()
+    for fraction in (.45,.75,1.):
+        radius=budget_seconds*8*fraction/2.8
+        for label,leg,along,side in styles:
+            a,b=chain[leg:leg+2]
+            scale=max(.1,math.cos(math.radians((a[1]+b[1])/2)))
+            dx,dy=(b[0]-a[0])*scale,b[1]-a[1]
+            length=math.hypot(dx,dy)
+            ux,uy=(dx/length,dy/length) if length else (1.,0.)
+            vx,vy=-uy,ux
+            anchor=b if along==1 else a
+            def offset(forward,lateral):
+                return [anchor[0]+radius*(forward*ux+lateral*vx)/(111320*scale),
+                        anchor[1]+radius*(forward*uy+lateral*vy)/111320]
+            if along==-1:
+                detour=[offset(-1,.35*side),offset(-.2,side)]
+            elif along==1:
+                detour=[offset(.3,side),offset(1,.25*side)]
+            else:
+                detour=[offset(.15,side),offset(.85,side)]
+            via=required[:leg]+detour+required[leg:]
+            if any(not -180<=p[0]<=180 or not -85<=p[1]<=85 or not point_inside(p,allowed_bounds) for p in via):continue
+            key=tuple(tuple(p) for p in via)
+            if key in seen:continue
+            seen.add(key);proposals.append((via,label))
+    return proposals
+
+
+def select_wild_routes(candidates, standard, baseline_seconds, budget_seconds, limit=3):
+    """Require new opportunities and genuinely different geography for wild slots."""
+    selected=[]
+    reference=list(standard)
+    remaining=distinct_states([(r,[]) for r in candidates],len(candidates)+1)
+    remaining=[r for r,_ in remaining]
+    footprints={id(r):route_grid_cells(r['geometry']['coordinates']) for r in [*reference,*remaining]}
+    best_value=max([1.,*[r['capture_value'] for r in remaining]])
+    while remaining and len(selected)<limit:
+        known_targets=set().union(*(set(r.get('mission_target_ids',r['target_ids'])) for r in reference)) if reference else set()
+        known_places={p['id'] for r in reference for p in r.get('bonus_places',[])}
+        choices=[]
+        for index,r in enumerate(remaining):
+            new_targets=set(r.get('mission_target_ids',r['target_ids']))-known_targets
+            new_places={p['id'] for p in r.get('bonus_places',[])}-known_places
+            if not new_targets and not new_places:continue
+            footprint=footprints[id(r)]
+            difference=min((len(footprint^footprints[id(other)])/max(1,len(footprint|footprints[id(other)])) for other in reference),default=1.)
+            if difference<.35:continue
+            used=min(1.,max(0.,r['duration']-baseline_seconds)/max(1,budget_seconds))
+            merit=.45*r['capture_value']/best_value+.4*difference+.15*used
+            choices.append((merit,-index,index))
+        if not choices:break
+        chosen=remaining.pop(max(choices)[2])
+        selected.append(dict(chosen,route_kind='wild',budget_used_fraction=round(max(0.,chosen['duration']-baseline_seconds)/max(1,budget_seconds),3)))
+        # Keep original objects as references for the cached footprints.
+        reference.append(chosen)
+    return selected
+
+
+def route_stop_labels(via,required,avoidance=False):
     labels=[]
     manual=0
     for point in via:
@@ -414,16 +497,22 @@ def route_stop_labels(via,required):
             manual+=1
             labels.append(f'W{manual}')
         else:
-            labels.append('exploration detour')
+            labels.append('road avoidance' if avoidance else 'exploration detour')
     return labels
 
 
-def search_routes(start, end, cells, budget_seconds, router, progress=None, strategy='beam', workers=4, waypoints=None, team='BLUE', allowed_bounds=None, places_loader=None, place_options=None):
+def search_routes(start, end, cells, budget_seconds, router, progress=None, strategy='beam', workers=4, waypoints=None, team='BLUE', allowed_bounds=None, places_loader=None, place_options=None, blocked_roads=None, mission_mode='balanced'):
     team=validate_team(team)
+    mission_mode=validate_mission_mode(mission_mode)
     options=validate_place_options(place_options)
+    if mission_mode=='special_ops' and (not places_loader or not options['enabled'] or options['weight']<=0):
+        raise ValueError('Special Operations requires enabled place bonuses, a positive bonus weight, and a place data source.')
+    if mission_mode!='balanced':cells=MissionCells(cells,team,mission_mode)
     required=validate_waypoints(waypoints)
     allowed_bounds=validate_bounds(allowed_bounds)
     validate_stops(start,end,required,allowed_bounds)
+    blocked_roads=validate_blocked_roads(blocked_roads)
+    validate_blocked_stops(start,end,required,blocked_roads)
     if isinstance(workers,bool) or not isinstance(workers,int) or not 1 <= workers <= 16:
         raise ValueError('Routing workers must be between 1 and 16.')
     if strategy not in ('greedy','beam','compare'):
@@ -436,33 +525,43 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
     cache_lock=threading.Lock()
     provider_requests=0
     provider_timings=[]
-    def cached_router(points,alternatives=False):
+    def provider_router(points,alternatives=False):
         nonlocal provider_requests
+        with cache_lock:provider_requests+=1
+        began=time.monotonic();failed=False
+        try:return router(points,alternatives)
+        except BaseException:
+            failed=True;raise
+        finally:
+            with cache_lock:provider_timings.append((time.monotonic()-began,failed))
+    baseline_points=[start,*required,end]
+    def cached_router(points,alternatives=False):
         if any(not point_inside(p,allowed_bounds) for p in points):
             raise ValueError('Detour is outside the route area.')
+        validate_blocked_stops(points[0],points[-1],points[1:-1],blocked_roads)
         key=(tuple(tuple(p) for p in points),alternatives)
         with cache_lock:
             owner=key not in cache
-            if owner:
-                cache[key]=Future()
-                provider_requests+=1
+            if owner:cache[key]=Future()
             future=cache[key]
         if owner:
-            began=time.monotonic()
-            failed=False
             try:
-                routes=router(points,alternatives)
-                routes=[r for r in routes if route_inside(r,allowed_bounds)]
+                returned=provider_router(points,alternatives)
+                routes=[r for r in returned if route_inside(r,allowed_bounds) and not route_blocked(r,blocked_roads)]
+                if not routes and blocked_roads and points==baseline_points:
+                    report(3,'Finding a baseline around blocked roads (up to 12 bypass checks)…')
+                    routes=find_bypass_routes(points,returned,blocked_roads,provider_router,allowed_bounds,progress=lambda done,total:report(3,f'Checking blocked-road bypass {done}/{total}…'))
+                if not routes and blocked_roads:
+                    raise ValueError('No accessible road route found around your blocked sections. Add a waypoint to guide the bypass, adjust the marks, or check whether the destination is reachable.')
                 if not routes and allowed_bounds:
                     raise ValueError('No returned road route stays inside the drawn area. Enlarge or clear the area, or add waypoints to guide the route.')
-                via=[list(p) for p in points[1:-1]]
-                future.set_result([dict(r,via_points=via,stop_labels=route_stop_labels(via,required)) for r in routes])
-            except BaseException as error:
-                failed=True
-                future.set_exception(error)
-            finally:
-                with cache_lock:
-                    provider_timings.append((time.monotonic()-began,failed))
+                prepared=[]
+                for r in routes:
+                    via=[list(p) for p in r.get('_avoidance_via',points[1:-1])]
+                    clean={k:v for k,v in r.items() if k!='_avoidance_via'}
+                    prepared.append(dict(clean,via_points=via,stop_labels=route_stop_labels(via,required,avoidance='_avoidance_via' in r)))
+                future.set_result(prepared)
+            except BaseException as error:future.set_exception(error)
         return future.result()
     report(2,'Finding the fastest baseline through your waypoints…' if required else 'Finding the fastest baseline route…')
     base=cached_router([start,*required,end],not required)
@@ -476,14 +575,19 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
         if options.get('week') and options['week']!=places_data.get('week_start'):
             remaining,excluded=100,[]
         place_scorer=PlaceScorer(places_data,remaining=remaining,excluded=excluded,weight=options['weight'])
+    if isinstance(cells,MissionCells):
+        cells.baseline_seconds=baseline['duration'];cells.baseline_cells=route_grid_cells(baseline['geometry']['coordinates'])
     scored_base=opportunity_score(baseline,cells, team=team,place_scorer=place_scorer)
     cap=baseline['duration']+budget_seconds
-    trials=[(r,list(required)) for r in base]
+    trials=[(r,list(r.get('via_points',required))) for r in base]
     failures=0
     detours=initial_detours(start,end,cells,budget_seconds,required, team=team) if budget_seconds else []
     if place_scorer and place_scorer.weight>0:
         bonus_detours=place_scorer.proposals(start,end,required,route_grid_cells(baseline['geometry']['coordinates']),limit=8,allowed_bounds=allowed_bounds)
         detours=(bonus_detours+detours)[:16] if budget_seconds else []
+    if mission_mode=='flanking' and budget_seconds>0:
+        loops=[via for via,label in wild_detours(start,end,required,budget_seconds,allowed_bounds)]
+        detours=(loops[4:8]+loops[8:12]+detours)[:16]
     detours=[via for via in detours if all(point_inside(p,allowed_bounds) for p in via)]
     report(10,f'Checking {len(detours)} territory detours with up to {workers} routing workers…')
     def exploration_progress(done,total):
@@ -502,8 +606,8 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
     for index,mode in enumerate(modes):
         started=time.monotonic()
         before_requests=provider_requests
-        lower=50+45*index/len(modes)
-        span=45/len(modes)
+        lower=50+35*index/len(modes)
+        span=35/len(modes)
         def refine_report(fraction,message):
             report(lower+span*fraction,message)
         if budget_seconds>0:
@@ -511,7 +615,7 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
         else:
             states,stats=seeds,{'refinement_requests':0,'failed_candidates':0,'beam_width':6 if mode=='beam' else 1}
         ranked=[r for r,_ in distinct_states(states,len(states)+1)]
-        useful=[r for r in ranked if r['target_count']>0 or (r.get('place_bonus',0)>0 and options['weight']>0)]
+        useful=[r for r in ranked if has_opportunities(r,options['weight'])]
         if mode=='beam':
             useful=[r for r,_ in diverse_states([(r,[]) for r in useful],6,minimum_difference=.2)]
         results[mode]={
@@ -521,15 +625,44 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
                          new_provider_requests=provider_requests-before_requests, routing_workers=workers),
         }
         report(lower+span,f'{mode.title()} search complete.')
+    if 'beam' in results and budget_seconds>0:
+        standard=[dict(r,route_kind='standard',budget_used_fraction=round(max(0.,r['duration']-baseline['duration'])/budget_seconds,3)) for r in results['beam']['routes'][:3]]
+        probes=wild_detours(start,end,required,budget_seconds,allowed_bounds)
+        wild_started=time.monotonic()
+        before_wild_requests=provider_requests
+        def wild_progress(done,total):
+            report(85+9*done/max(1,total),f'Checking wider loops: {done}/{total}…')
+        report(85,f'Exploring up to {len(probes)} wider loops, including departures away from the destination…')
+        outcomes=routing_batch([[start,*via,end] for via,_ in probes],cached_router,workers,wild_progress)
+        candidates=[]
+        wild_failures=0
+        for (via,label),(routes,error) in zip(probes,outcomes):
+            if error:
+                wild_failures+=1;continue
+            for r in routes:
+                if r['duration']<=cap+1e-6:
+                    candidate=opportunity_score(r,cells,team=team,place_scorer=place_scorer)
+                    if has_opportunities(candidate,options['weight']):
+                        candidates.append(dict(candidate,wild_direction=label))
+        wild=select_wild_routes(candidates,standard,baseline['duration'],budget_seconds)
+        results['beam']['routes']=standard+wild
+        results['beam']['no_opportunities']=not (standard or wild)
+        results['beam']['failed_candidates']+=wild_failures
+        results['beam']['stats']['new_provider_requests']+=provider_requests-before_wild_requests
+        results['beam']['stats'].update(wild_search_requests=len(probes),wild_routes=len(wild),wild_search_seconds=round(time.monotonic()-wild_started,3))
     active='beam' if strategy=='compare' else strategy
     report(95,'Ranking routes and preparing driving directions…')
     chosen=results[active]
-    response=dict(chosen,baseline=scored_base,team=team,strategy=active,required_waypoints=required,allowed_bounds=allowed_bounds,
+    response=dict(chosen,baseline=scored_base,team=team,strategy=active,required_waypoints=required,allowed_bounds=allowed_bounds,blocked_roads=blocked_roads,
                   shared_provider_requests=shared_requests,total_provider_requests=provider_requests,
                   routing_metrics={'workers':workers,'mean_request_seconds':round(sum(t for t,_ in provider_timings)/max(1,len(provider_timings)),2),
                                    'failed_requests':sum(failed for _,failed in provider_timings)},
                   message='No target squares found within this budget. Increase extra driving time or change endpoints.'
                           if chosen['no_opportunities'] else 'Unmapped squares are exploration opportunities; radio coverage is unverified.')
+    response['mission']={'id':mission_mode,'name':MODES[mission_mode][0],'description':MODES[mission_mode][1]}
+    response['mission_mode']=mission_mode
+    if mission_mode=='fortify' and chosen['no_opportunities']:response['message']='No friendly reinforcement opportunities found within this budget.'
+    if mission_mode=='special_ops' and chosen['no_opportunities']:response['message']=places_data.get('error') or 'No eligible place bonuses found within this budget and weekly allowance.'
     response['places']={**places_data,'enabled':bool(places_loader and options['enabled']),
                         'weight':options['weight'],'remaining':place_scorer.remaining if place_scorer else options['remaining'],
                         'excluded':list(place_scorer.excluded) if place_scorer else options['excluded'],

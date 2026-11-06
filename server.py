@@ -18,6 +18,8 @@ from places import PlacesFeed, place_options
 from capture_users import CaptureUsers
 from drive_reports import DriveReports
 from square_api import SquareAPI
+from mission_modes import validate_mission_mode
+from road_blocks import validate_blocked_roads, validate_blocked_stops
 from navigation import build_export
 from gpx_shares import GPXShares, ShareCapacityError
 from teams import validate_team
@@ -79,6 +81,7 @@ def parse_plan_request(data):
     if not isinstance(data, dict):
         raise ValueError('Expected a JSON object.')
     team = validate_team(data.get('team', 'BLUE'))
+    validate_mission_mode(data.get('mission_mode','balanced'))
     allowed_bounds = validate_bounds(data.get('allowed_bounds'))
     start, end = point(data['start']), point(data['end'])
     raw_waypoints = data.get('waypoints', [])
@@ -86,6 +89,7 @@ def parse_plan_request(data):
         raise ValueError('Provide at most eight ordered waypoints.')
     required_waypoints = [point(value) for value in raw_waypoints]
     validate_stops(start,end,required_waypoints,allowed_bounds)
+    validate_blocked_stops(start,end,required_waypoints,validate_blocked_roads(data.get('blocked_roads')))
     budget = float(data.get('detour_minutes', 15))*60
     if not math.isfinite(budget) or not 0 <= budget <= 7200:
         raise ValueError('Detour must be between 0 and 120 minutes.')
@@ -218,12 +222,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 result = search_routes(start, end, coverage, budget, fetch_routes,
                                        lambda update: self.send_event('progress', update), strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints, team=team, allowed_bounds=allowed_bounds,
-                                       places_loader=places_feed.load if places_feed else None,place_options=bonus_options)
+                                       places_loader=places_feed.load if places_feed else None,place_options=bonus_options,blocked_roads=data.get('blocked_roads'),mission_mode=data.get('mission_mode','balanced'))
                 annotate_routes(result, radio_snapshot)
                 result['board_revision'] = board_snapshot.get('revision')
                 return self.send_event('result', result)
             result = search_routes(start, end, coverage, budget, fetch_routes, strategy=strategy, workers=ROUTING_WORKERS, waypoints=required_waypoints, team=team, allowed_bounds=allowed_bounds,
-                                       places_loader=places_feed.load if places_feed else None,place_options=bonus_options)
+                                       places_loader=places_feed.load if places_feed else None,place_options=bonus_options,blocked_roads=data.get('blocked_roads'),mission_mode=data.get('mission_mode','balanced'))
             annotate_routes(result, radio_snapshot)
             result['board_revision'] = board_snapshot.get('revision')
             return self.send_json(result)

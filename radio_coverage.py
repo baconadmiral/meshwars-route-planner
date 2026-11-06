@@ -189,7 +189,7 @@ def annotate_routes(result, snapshot):
         visited = route_grid_cells(coords)
         counts = {'verified_tx': 0, 'passive_rx_only': 0, 'unknown': 0}
         target_counts = dict(counts)
-        targets = set(route['target_ids'])
+        targets = set(route.get('mission_target_ids',route['target_ids']))
         for cell in visited:
             kinds = set()
             for event in indexed.get(cell, []):
