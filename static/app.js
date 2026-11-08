@@ -1,5 +1,21 @@
 'use strict';
 const $ = id => document.getElementById(id);
+async function loadAppVersion(){
+ const label=$('app-version');
+ try{
+  const response=await fetch('/api/version',{cache:'no-store'});
+  if(!response.ok)throw Error('Version unavailable');
+  const data=await response.json();
+  if(!data||!(data.version==='development'||/^[0-9a-f]{12}$/.test(data.version)))throw Error('Invalid version');
+  label.textContent=`Version ${data.version}`;
+  label.title=data.revision?`Deployed Git commit: ${data.revision}. Refresh after a deployment to see the new version.`:'Local development build; no production commit was embedded.';
+ }catch{
+  label.textContent='Version unavailable';
+  label.title='Refresh to retry loading the deployed version.';
+ }
+}
+loadAppVersion();
+
 let board = [], result = null, routeIndex = 0, clickCount = 0;
 let boardRevision=null,boardAvailable=false,feedMetadata=null,feedLoading=false,boardStartupChecks=0;
 const colors = {BLUE:'#1656e8',RED:'#e44444',GREEN:'#2e9e65',PURPLE:'#8858be',YELLOW:'#d2a716',ORANGE:'#e88032',PINK:'#db6aa5'};

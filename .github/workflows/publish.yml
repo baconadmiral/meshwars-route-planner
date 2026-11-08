@@ -39,6 +39,7 @@ jobs:
         run: |
           IMAGE="ghcr.io/${REPOSITORY,,}"
           docker build --target production \
+            --build-arg "APP_REVISION=$COMMIT_SHA" \
             --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
             --label "org.opencontainers.image.revision=$COMMIT_SHA" \
             -t "$IMAGE:latest" -t "$IMAGE:sha-$COMMIT_SHA" .

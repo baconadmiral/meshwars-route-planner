@@ -17,6 +17,12 @@ The required pre-merge checks are `test` and `browser`, not `publish`: publishin
 
 Agents must preserve these rules and report any access or failing-check blockers rather than pushing directly to `main`. Keep API keys, `.env`, and the Render deploy-hook URL out of commits, pull request text, and logs.
 
+## Deployed app version
+
+The header displays **Version `<12-character Git commit>`**. Hover over it for the full commit. Refresh after a deployment to see the running build's version; an already-open page does not automatically detect a new deployment. Each merge produces a different version without manually updating a release number.
+
+CI passes the full Git SHA into the production Docker image as the `APP_REVISION` build argument, independently of the GHCR image tag. `/api/version` returns the short `version` and full `revision` with caching disabled. Builds without a valid 40-character commit SHA show **Version development**. Existing images need to be rebuilt and deployed with this change before they can display a version. Do not set a fixed `APP_REVISION` in Render's environment, which would override the identity embedded by CI.
+
 ## Run locally
 
 Requires Python 3.10+ and an internet connection for address lookup, routing, map tiles, and the Leaflet map library. The local development server uses only the standard library. The hosted entry point and full test suite additionally use the pinned packages in `requirements.txt`.

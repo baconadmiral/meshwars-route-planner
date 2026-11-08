@@ -24,6 +24,7 @@ from gpx_shares import GPXShares, ShareCapacityError
 from radio_coverage import RadioCoverage, annotate_routes
 from route_bounds import validate_bounds, StopsOutsideArea
 from server import ROOT, ROUTING_WORKERS, SearchCancelled, fetch_routes, parse_plan_request
+from app_version import build_version
 from planner import search_routes
 
 
@@ -120,6 +121,10 @@ def create_app(runtime, search_limit=2):
     @app.get('/healthz')
     def health():
         return jsonify(status='ok')
+
+    @app.get('/api/version')
+    def version():
+        return jsonify(build_version())
 
     @app.get('/readyz')
     def ready():

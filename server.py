@@ -1,5 +1,6 @@
 """Local-only HTTP application; Python standard library, no dependencies."""
 import argparse
+from app_version import build_version
 import json
 import math
 import os
@@ -131,6 +132,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == '/api/version':
+            return self.send_json(build_version())
         if path in ('/api/board', '/api/board/status'):
             return self.send_json(self.board_snapshot(include_coverage=path == '/api/board'))
         if path.startswith('/api/gpx-shares/') and path.endswith('.gpx'):
