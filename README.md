@@ -43,13 +43,20 @@ Hosted behavior includes JSON/body-size validation, same-origin POST checks, bas
 
 ### Publish a production image to GitHub Container Registry
 
-The **Publish production image** GitHub Actions workflow (`.github/workflows/publish.yml`) builds the Dockerfile's test target before building and publishing its production target. It uses GitHub's built-in `GITHUB_TOKEN` with package-write permission; no personal access token or local Docker installation is needed. It runs manually from the repository's default branch.
+The **Publish production image** workflow (`.github/workflows/publish.yml`) runs on pushes to `main`, with an optional manual run on `main`. It tests the container, publishes production images to GHCR, then requests a Render deployment of that exact commit's image. GitHub's built-in `GITHUB_TOKEN` supplies package-write access; local Docker and a personal registry token are unnecessary.
 
-After pushing the workflow to GitHub, open **Actions → Publish production image → Run workflow**, select the default branch, and start it. A successful run publishes `ghcr.io/baconadmiral/meshwars-route-planner:latest` and an immutable-by-convention `sha-<full-commit-SHA>` tag. Use the commit tag or registry digest when pinning a deployment. Review the run's summary for the image names.
+Set up deployment once:
 
-New GHCR packages are private by default. For anonymous pulls by a hosting service, open your GitHub profile's **Packages → meshwars-route-planner → Package settings → Change visibility → Public**. Otherwise configure registry credentials in the hosting service. Runtime secrets such as `MESHWARS_API_KEY` belong in the host's environment settings; the Docker context excludes `.env` and local caches. Publishing an image does not deploy the app or automatically make the package public.
+1. In the existing Render image-backed service, open **Settings → Deploy Hook** and copy the secret URL.
+2. In GitHub, open **Settings → Secrets and variables → Actions → New repository secret**. Name it `RENDER_DEPLOY_HOOK_URL` and paste the URL. Do not commit the hook URL or put it in issue comments or logs.
+3. Keep the Render service configured with the image repository `ghcr.io/baconadmiral/meshwars-route-planner`. Its configured tag can remain the current commit tag: the hook overrides it with each newly published `sha-<full-commit-SHA>` tag.
+4. Push to `main`, or use **Actions → Publish production image → Run workflow → main**. Watch the GitHub run, then Render's Events page for deployment completion.
 
-The workflow has not yet been run against GHCR from this workspace; verify its first build and push in GitHub Actions.
+The workflow fails clearly if the hook secret is missing. Build/test or image-push failures prevent the deployment request. Publishing is serialized, and each deploy specifies its commit tag instead of relying on `latest`. Tags are immutable by convention; a registry digest provides stronger pinning. A successful hook request means Render accepted or queued deployment, not that startup/readiness has completed. Verify `/healthz`, `/readyz`, feed status, and a route after rollout. The revised automatic deployment has not yet been exercised from this workspace.
+
+Each successful publish produces `ghcr.io/baconadmiral/meshwars-route-planner:latest` and `ghcr.io/baconadmiral/meshwars-route-planner:sha-<full-commit-SHA>`. To roll back, select a previously working commit image in Render and redeploy; subsequent pushes to `main` deploy automatically again.
+
+New GHCR packages are private by default. For anonymous hosting-service pulls, open your GitHub profile's **Packages → meshwars-route-planner → Package settings → Change visibility → Public**. Otherwise configure registry credentials in Render. Runtime secrets such as `MESHWARS_API_KEY` remain in Render's environment settings; the Docker context excludes `.env` and local caches. Publishing does not change package visibility.
 
 ### HTTPS and invited-user access
 
@@ -77,7 +84,7 @@ After updating a Docker deployment, rebuild/recreate the app and reload its page
 
 - **Health:** `/healthz` reports application liveness; `/readyz` returns 503 until a board is available. The Docker health check uses liveness, so an upstream outage does not cause restart loops. Monitor readiness and feed freshness separately.
 - **Data and secrets:** back up the `planner-data` volume off-host, and the Caddy volumes when used. Stop the application for a consistent volume snapshot. Keep the `.env`/secret-manager backup separate and restricted. A normal Compose shutdown preserves volumes; avoid `down -v` for real deployments.
-- **Updates:** run the container tests, rebuild with refreshed base images, and recreate the service. Retain a known-good image tag for rollback. Container checks run on pushes and pull requests; the separate manual publishing workflow pushes production images to GHCR. Neither workflow deploys the application.
+- **Updates:** run the container tests, rebuild with refreshed base images, and recreate the service. Retain a known-good image tag for rollback. Container checks run on pushes and pull requests; the publishing workflow tests/pushes production images to GHCR on `main` and requests deployment through the configured Render hook.
 - **External services:** configure `OSRM_URL`, `OSRM_WORKERS`, `OSRM_REQUEST_INTERVAL`, and `PHOTON_URL` for a provider suitable for your usage. Public demo services are the development defaults, not a promised production capacity or SLA. Map tiles and Leaflet/QR libraries also require external network access; library versions are fixed in the page but remain CDN-hosted.
 - **Public launch:** choose the host/domain, authentication approach, uptime/freshness monitoring, backup destination, and routing/geocoding capacity. Anonymous public access additionally needs per-user/IP quotas and stronger abuse controls. Horizontal scaling needs shared admission/rate limits and one feed/cache owner first.
 

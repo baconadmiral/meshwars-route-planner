@@ -1,6 +1,8 @@
 name: Publish production image
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +14,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -20,6 +22,14 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - name: Check deployment configuration
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo '::error::Add the RENDER_DEPLOY_HOOK_URL repository secret before deploying.'
+            exit 1
+          fi
       - name: Test container
         run: docker build --target test -t meshwars-route-planner:test .
       - name: Build production image
@@ -49,6 +59,21 @@ jobs:
             echo '### Published production image'
             echo "\`$IMAGE:latest\`"
             echo "\`$IMAGE:sha-$COMMIT_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Deploy published commit to Render
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          IMAGE="ghcr.io/${REPOSITORY,,}:sha-$COMMIT_SHA"
+          curl --fail --silent --show-error --output /dev/null \
+            --connect-timeout 15 --max-time 60 \
+            --get --data-urlencode "imgURL=$IMAGE" "$RENDER_DEPLOY_HOOK_URL"
+          {
+            echo '### Render deployment requested'
+            echo "Requested deployment of \`$IMAGE\`."
+            echo 'Check Render Events for rollout completion; hook acceptance does not confirm the service is live.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Sign out
         if: always()
