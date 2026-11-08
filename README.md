@@ -41,6 +41,16 @@ At startup, the app reads its last successful board from `/data/board.json`, or 
 
 Hosted behavior includes JSON/body-size validation, same-origin POST checks, basic response security headers, and an immediate **429** with `Retry-After` when search capacity is full. The default `MAX_CONCURRENT_SEARCHES=2` shares the configured OSRM worker/rate budget. Progress is streamed as NDJSON with buffering disabled and blank-line keepalives. Disconnects stop search work at the next progress checkpoint; already-issued provider requests can run until their timeout. Request bodies and personal locations are not written to access logs. The short-lived geocoder cache remains in memory.
 
+### Publish a production image to GitHub Container Registry
+
+The **Publish production image** GitHub Actions workflow (`.github/workflows/publish.yml`) builds the Dockerfile's test target before building and publishing its production target. It uses GitHub's built-in `GITHUB_TOKEN` with package-write permission; no personal access token or local Docker installation is needed. It runs manually from the repository's default branch.
+
+After pushing the workflow to GitHub, open **Actions → Publish production image → Run workflow**, select the default branch, and start it. A successful run publishes `ghcr.io/baconadmiral/meshwars-route-planner:latest` and an immutable-by-convention `sha-<full-commit-SHA>` tag. Use the commit tag or registry digest when pinning a deployment. Review the run's summary for the image names.
+
+New GHCR packages are private by default. For anonymous pulls by a hosting service, open your GitHub profile's **Packages → meshwars-route-planner → Package settings → Change visibility → Public**. Otherwise configure registry credentials in the hosting service. Runtime secrets such as `MESHWARS_API_KEY` belong in the host's environment settings; the Docker context excludes `.env` and local caches. Publishing an image does not deploy the app or automatically make the package public.
+
+The workflow has not yet been run against GHCR from this workspace; verify its first build and push in GitHub Actions.
+
 ### HTTPS and invited-user access
 
 An optional Caddy configuration supplies automatic HTTPS and a password gate. Set `PLANNER_DOMAIN`, `PLANNER_USER`, and `PLANNER_PASSWORD_HASH` in `.env`. Generate a bcrypt hash interactively using Caddy so a real password does not enter shell history:
@@ -67,7 +77,7 @@ After updating a Docker deployment, rebuild/recreate the app and reload its page
 
 - **Health:** `/healthz` reports application liveness; `/readyz` returns 503 until a board is available. The Docker health check uses liveness, so an upstream outage does not cause restart loops. Monitor readiness and feed freshness separately.
 - **Data and secrets:** back up the `planner-data` volume off-host, and the Caddy volumes when used. Stop the application for a consistent volume snapshot. Keep the `.env`/secret-manager backup separate and restricted. A normal Compose shutdown preserves volumes; avoid `down -v` for real deployments.
-- **Updates:** run the container tests, rebuild with refreshed base images, and recreate the service. Retain a known-good image tag for rollback. The GitHub Actions workflow builds/tests the image on pushes and pull requests; it does not publish or deploy.
+- **Updates:** run the container tests, rebuild with refreshed base images, and recreate the service. Retain a known-good image tag for rollback. Container checks run on pushes and pull requests; the separate manual publishing workflow pushes production images to GHCR. Neither workflow deploys the application.
 - **External services:** configure `OSRM_URL`, `OSRM_WORKERS`, `OSRM_REQUEST_INTERVAL`, and `PHOTON_URL` for a provider suitable for your usage. Public demo services are the development defaults, not a promised production capacity or SLA. Map tiles and Leaflet/QR libraries also require external network access; library versions are fixed in the page but remain CDN-hosted.
 - **Public launch:** choose the host/domain, authentication approach, uptime/freshness monitoring, backup destination, and routing/geocoding capacity. Anonymous public access additionally needs per-user/IP quotas and stronger abuse controls. Horizontal scaling needs shared admission/rate limits and one feed/cache owner first.
 

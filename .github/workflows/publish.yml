@@ -1,0 +1,55 @@
+name: Publish production image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-production-image
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test container
+        run: docker build --target test -t meshwars-route-planner:test .
+      - name: Build production image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          IMAGE="ghcr.io/${REPOSITORY,,}"
+          docker build --target production \
+            --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
+            --label "org.opencontainers.image.revision=$COMMIT_SHA" \
+            -t "$IMAGE:latest" -t "$IMAGE:sha-$COMMIT_SHA" .
+      - name: Sign in to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+      - name: Push production image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          IMAGE="ghcr.io/${REPOSITORY,,}"
+          docker push "$IMAGE:sha-$COMMIT_SHA"
+          docker push "$IMAGE:latest"
+          {
+            echo '### Published production image'
+            echo "\`$IMAGE:latest\`"
+            echo "\`$IMAGE:sha-$COMMIT_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Sign out
+        if: always()
+        run: docker logout ghcr.io
