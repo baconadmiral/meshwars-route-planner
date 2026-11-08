@@ -15,6 +15,19 @@ def route(points):
 
 
 class HostingTests(unittest.TestCase):
+    def test_reports_use_cached_board_and_serve_page_assets(self):
+        response = self.client.get('/api/reports/territory')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        self.assertEqual(len(response.get_json()['days']), 30)
+        self.runtime.board.snapshot.assert_called_once_with(True)
+        self.assertFalse(self.runtime.board.request_refresh.called)
+        for path in ('/reports', '/reports.js', '/reports.css'):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                response.close()
+
     def test_version_is_public_and_not_cached(self):
         revision = '303c9597cabbd714332efc804f33e96084c19f35'
         with patch.dict('os.environ', {'APP_REVISION': revision}):

@@ -1,6 +1,7 @@
 """Local-only HTTP application; Python standard library, no dependencies."""
 import argparse
 from app_version import build_version
+from territory_reports import territory_report
 import json
 import math
 import os
@@ -134,6 +135,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == '/api/version':
             return self.send_json(build_version())
+        if path == '/api/reports/territory':
+            return self.send_json(territory_report(self.board_snapshot()))
         if path in ('/api/board', '/api/board/status'):
             return self.send_json(self.board_snapshot(include_coverage=path == '/api/board'))
         if path.startswith('/api/gpx-shares/') and path.endswith('.gpx'):
@@ -162,7 +165,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(self.server.drives.status())
         if path == '/api/radio-coverage':
             return self.send_json(self.radio_snapshot())
-        assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css'),
+                  '/reports': ('reports.html', 'text/html'), '/reports.js': ('reports.js', 'text/javascript'),
+                  '/reports.css': ('reports.css', 'text/css')}
         if path not in assets:
             return self.send_error(404)
         name, content_type = assets[path]

@@ -25,6 +25,7 @@ from radio_coverage import RadioCoverage, annotate_routes
 from route_bounds import validate_bounds, StopsOutsideArea
 from server import ROOT, ROUTING_WORKERS, SearchCancelled, fetch_routes, parse_plan_request
 from app_version import build_version
+from territory_reports import territory_report
 from planner import search_routes
 
 
@@ -113,8 +114,18 @@ def create_app(runtime, search_limit=2):
     def index():
         return send_from_directory(ROOT/'static', 'index.html')
 
+    @app.get('/reports')
+    def reports_page():
+        return send_from_directory(ROOT/'static', 'reports.html')
+
+    @app.get('/api/reports/territory')
+    def reports_data():
+        return jsonify(territory_report(runtime.board.snapshot(True)))
+
     @app.get('/app.js')
     @app.get('/style.css')
+    @app.get('/reports.js')
+    @app.get('/reports.css')
     def asset():
         return send_from_directory(ROOT/'static', request.path[1:])
 

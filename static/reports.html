@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Territory reports / MeshWars Route Planner</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/reports.css">
+  <script defer src="/reports.js"></script>
+</head>
+<body class="reports-page">
+  <header><a href="/">← Route planner</a><div>MESHWARS / REPORTS<small>Meshtastic territory activity</small></div><button id="theme-toggle" type="button" aria-pressed="false">Dark mode</button></header>
+  <main class="reports-main">
+    <div class="report-heading"><div><span class="eyebrow">LAST 30 DAYS · UTC</span><h1>Territory points per day</h1><p id="report-period">Loading the current board…</p></div><button id="refresh-report" type="button">Refresh report</button></div>
+    <p class="report-notice">One point per <strong>currently held square</strong>, grouped by its last capture date. Squares later lost are absent, so this is not complete capture history or net daily gain. Check-in, exploration and defense bonuses are excluded. Today is incomplete.</p>
+    <p id="report-status" role="status" aria-live="polite">Loading report…</p>
+    <div id="report-content" hidden>
+      <section class="report-summary" aria-label="Report summary"><div><span>Territory points in window</span><strong id="report-total"></strong></div><div><span>Peak day · all teams</span><strong id="report-peak"></strong></div><div><span>Squares without usable capture times</span><strong id="report-missing"></strong></div></section>
+      <section class="report-panel" aria-labelledby="chart-heading"><h2 id="chart-heading">Daily territory points</h2><p class="fine">Toggle teams to compare their daily counts. Hover or focus a point for its date and score. On small screens, scroll the graph sideways. The table below includes the same data.</p><fieldset id="report-teams"><legend>Teams shown on chart</legend></fieldset><div id="report-chart" tabindex="0" role="region" aria-label="Scrollable daily territory graph"></div><p id="chart-point" class="fine" role="status" aria-live="polite"></p></section>
+      <section class="report-panel" aria-labelledby="table-heading"><h2 id="table-heading">Daily breakdown</h2><div class="report-table-scroll" tabindex="0" role="region" aria-label="Scrollable daily territory table"><table id="report-table"><caption>Territory points by capture date (UTC), all teams</caption><thead></thead><tbody></tbody></table></div></section>
+    </div>
+  </main>
+  <footer>MeshWars territory reports · Uses the cached board; refreshing this page does not poll MeshWars.</footer>
+</body>
+</html>

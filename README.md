@@ -209,6 +209,14 @@ The selected navigation line uses a contrasting color rather than your team colo
 
 **Hide captured squares** in the sidebar toggles all teams’ owned-square fills and captured-square target outlines. The route and unpainted target outlines remain visible, subject to existing display filters. The button changes to **Show captured squares** to restore the layer and the choice persists in this browser. This only changes display: scoreboard totals and route scoring continue to use the full board.
 
+## Territory reports
+
+Open **Reports** in the header, or visit `/reports`, for a 30-day graph and daily table of territory points across all seven Meshtastic teams. The window includes today and the preceding 29 UTC calendar days. Toggle chart teams independently; the table and summary retain all teams. Hover or keyboard-focus a point to inspect its value. On phones, the chart and table scroll horizontally inside their panels.
+
+Each point represents one **currently held square**, attributed to its current owner and grouped by its last capture timestamp, matching the capture-age filter's basis. It is not full capture-event history, cumulative points, or net territory gained: squares subsequently lost are absent, and repeated historical captures are not reconstructed. Check-in, exploration, and defense bonuses are excluded. Missing, invalid, or future capture timestamps are counted as exclusions, and today is labeled incomplete. The documented [capture API](https://meshwars.com/api#captures) supplies only a limited recent feed without historical pagination, so it cannot establish a complete 30-day gain history.
+
+`GET /api/reports/territory` aggregates the shared cached board without new upstream requests. The page shows board freshness and excluded timestamp counts, preserves the previous report on refresh failure, and shows unavailable data separately from a valid zero-activity report. Refreshing uses the latest board already held by the server; the normal background feed controls its upstream freshness. Team/player/age filters from the map do not affect the standalone report.
+
 ## Team scores and color filters
 
 The strip below the header shows **total points** and **squares currently held** for each team, ranked by total points. Total points come from MeshWars’ public Meshtastic scoreboard (`https://meshwars.com/scores`) and include territory, check-in, and exploration points. Hover a card for the breakdown. Squares held are current territory, not a count of all historical capture events; the board does not contain per-team lifetime capture counts. Per-square defense scores are not summed into this total.
