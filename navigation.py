@@ -92,7 +92,7 @@ def build_export(route):
     raw_labels=route.get('stop_labels',[])
     if not isinstance(raw_labels,list):
         raise ValueError('Invalid stop labels.')
-    labels=['A']+[str(raw_labels[i])[:80] if i<len(raw_labels) else f'Detour {i+1}' for i in range(len(via))]+['B']
+    labels=['Start']+[str(raw_labels[i])[:80] if i<len(raw_labels) else f'Detour {i+1}' for i in range(len(via))]+['Finish']
     sections=[]
     section_legs=GOOGLE_MAPS_WAYPOINT_LIMIT+1
     for start in range(0,len(points)-1,section_legs):

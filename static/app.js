@@ -131,9 +131,23 @@ function bindLocation(id){
  };
 }
 ['start','end'].forEach(bindLocation);
+$('swap-endpoints').onclick=()=>{
+ if(searching)return;
+ const startValue=$('start').value,endValue=$('end').value;
+ const startLocation=selectedLocations.start,endLocation=selectedLocations.end;
+ clearAddress('start');clearAddress('end');
+ $('start').value=endValue;$('end').value=startValue;
+ if(endLocation&&endLocation.label===endValue.trim())selectedLocations.start=endLocation;
+ if(startLocation&&startLocation.label===startValue.trim())selectedLocations.end=startLocation;
+ if(mapPickTarget==='start'||mapPickTarget==='end')mapPickTarget=null;
+ clearDisplayedRoute();
+ if(markers)updateMarkers();
+ $('status').textContent='Start and finish swapped. Plan again to find routes.';
+};
+
 function updateMarkers(){
  markers.clearLayers();
- for(const [id,label] of [['start','A'],...waypointIds().map((id,index)=>[id,`W${index+1}`]),['end','B']]){
+ for(const [id,label] of [['start','Start'],...waypointIds().map((id,index)=>[id,`W${index+1}`]),['end','Finish']]){
   try{const p=locationPoint(id);L.marker([p[1],p[0]]).addTo(markers).bindTooltip(label,{permanent:true});}catch{}
  }
 }
@@ -297,12 +311,16 @@ function captureVisible(cell,now=Date.now()/1000){
  if(mapPlayerFilter==='__unknown__'&&cell?.captured_by)return false;
  if(mapPlayerFilter&&mapPlayerFilter!=='__unknown__'&&cell?.captured_by?.toLocaleLowerCase()!==mapPlayerFilter.toLocaleLowerCase())return false;
  if(mapTeamFilter&&cell?.owner_team!==mapTeamFilter)return false;
+ return captureAgeVisible(cell,now);
+}
+function captureAgeVisible(cell,now=Date.now()/1000){
  if(captureDays===0)return true;
  const captured=cell?.captured_at;
  return typeof captured==='number' && Number.isFinite(captured) && captured>0 &&
         captured<=now && captured>=now-captureDays*86400;
 }
 function drawBoard(){
+ updateFilteredTeamScores();
  if(!map)return;
  territories.clearLayers();
  if(!board.length){
@@ -657,10 +675,10 @@ function showRoute(index){
  const steps=[];
  r.legs.forEach((leg,legIndex)=>leg.steps.forEach(step=>{
   let text=instruction(step);
-  if(step.maneuver.type==='arrive')text=legIndex===r.legs.length-1?'Arrive at destination B':`Reach ${r.stop_labels?.[legIndex]||'exploration detour'}; continue to the next leg`;
+  if(step.maneuver.type==='arrive')text=legIndex===r.legs.length-1?'Arrive at Finish':`Reach ${r.stop_labels?.[legIndex]||'exploration detour'}; continue to the next leg`;
   steps.push(`<li><span>${escape(text)}</span><small>${miles(step.distance)}</small></li>`);
  }));
- $('results').innerHTML=`<div class="cards">${cards}</div><div class="routehead"><h2>Route briefing</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-modal" aria-haspopup="dialog">Navigate / send to phone</button><button id="download">GeoJSON</button><button id="clear-displayed-route" type="button">Clear route</button></div></div>${result.mission?`<p class="mission-brief"><strong>${escape(result.mission.name)}</strong> · ${escape(result.mission.description)}</p>`:''}<p class="trip">A: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → B: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value${r.mission_mode&&r.mission_mode!=='balanced'?'':r.place_bonus?`<br>${utility(r.territory_value)} territory priority + ${utility(r.place_bonus)} estimated place points × ${result.places?.weight??1}`:''}<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p>${routeValueDetails(r)}${routeCoverageDetails(r)}${placeBonusDetails(r)}<ol class="steps">${steps.join('')}</ol>`;
+ $('results').innerHTML=`<div class="cards">${cards}</div><div class="routehead"><h2>Route briefing</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-modal" aria-haspopup="dialog">Navigate / send to phone</button><button id="download">GeoJSON</button><button id="clear-displayed-route" type="button">Clear route</button></div></div>${result.mission?`<p class="mission-brief"><strong>${escape(result.mission.name)}</strong> · ${escape(result.mission.description)}</p>`:''}<p class="trip">Start: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → Finish: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value${r.mission_mode&&r.mission_mode!=='balanced'?'':r.place_bonus?`<br>${utility(r.territory_value)} territory priority + ${utility(r.place_bonus)} estimated place points × ${result.places?.weight??1}`:''}<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p>${routeValueDetails(r)}${routeCoverageDetails(r)}${placeBonusDetails(r)}<ol class="steps">${steps.join('')}</ol>`;
  document.querySelectorAll('[data-route]').forEach(el=>el.onclick=()=>showRoute(Number(el.dataset.route)));
  document.querySelectorAll('[data-used-place]').forEach(button=>button.onclick=()=>{
   const place=r.bonus_places.find(place=>place.id===Number(button.dataset.usedPlace));
@@ -913,6 +931,20 @@ function setTeamMapFilter(team){
  $('team-score-list').querySelector(`[data-team="${team}"] button`)?.focus();
 }
 $('team-filter-clear').onclick=()=>{mapTeamFilter=null;renderTeamScores();drawBoard();};
+function updateFilteredTeamScores(){
+ const counts=Object.fromEntries(Object.keys(colors).map(team=>[team,0]));
+ const now=Date.now()/1000;
+ for(const cell of board){
+  if(Object.hasOwn(counts,cell.owner_team)&&captureAgeVisible(cell,now))counts[cell.owner_team]++;
+ }
+ for(const team of Object.keys(colors)){
+  const label=$(`filtered-score-${team}`);
+  if(!label)continue;
+  label.hidden=captureDays===0;
+  label.textContent=boardAvailable?`${counts[team].toLocaleString()} territory pts · last ${captureDays} ${captureDays===1?'day':'days'}`:'Filtered territory score unavailable';
+  label.title='One territory point per currently held square matching the capture-age filter, across the full board. Excludes check-in and exploration bonuses. Missing or future capture times are excluded. Team, player, map viewport and hide-square filters do not affect this count.';
+ }
+}
 function renderTeamScores(){
  const counts=Object.fromEntries(Object.keys(colors).map(team=>[team,0]));
  for(const cell of board){if(Object.hasOwn(counts,cell.owner_team))counts[cell.owner_team]++;}
@@ -921,7 +953,8 @@ function renderTeamScores(){
  const entries=Object.keys(colors).map(team=>({team,score:liveScores?.get(team)?.total,
   count:liveScores?.get(team)?.tiles??(boardAvailable?counts[team]:null),details:liveScores?.get(team)}));
  entries.sort((a,b)=>(b.score??b.count??-1)-(a.score??a.count??-1)||Object.keys(colors).indexOf(a.team)-Object.keys(colors).indexOf(b.team));
- $('team-score-list').innerHTML=entries.map(({team,score,count,details})=>`<li class="team-score ${team===selectedTeam()?'selected':''} ${mapTeamFilter===team?'filtered':''} ${mapTeamFilter&&mapTeamFilter!==team?'muted':''}" data-team="${team}" style="--score-team-color:${colors[team]}"><button class="team-score-filter" type="button" aria-pressed="${mapTeamFilter===team}" aria-label="${team}: ${score===undefined?'points unavailable':`${score} points`}, ${count===null?'territory unavailable':`${count} squares held`}. Filter map to ${team}${team===selectedTeam()?', your planning team':''}" title="${details?`${details.tiles.toLocaleString()} squares + ${details.checkin_points.toLocaleString()} check-in + ${details.explorer_points.toLocaleString()} exploration points. `:'Total points unavailable. '}Click to show only ${team}; click again to show all teams."><span class="team-score-name"><i aria-hidden="true"></i>${team}${team===selectedTeam()?' · you':''}</span><strong>${score===undefined?'—':Number(score).toLocaleString(undefined,{maximumFractionDigits:2})}<span class="team-score-unit"> points</span></strong><span class="team-score-captures">${count===null?'—':Number(count).toLocaleString()} ${count===1?'square':'squares'} held</span></button></li>`).join('');
+ $('team-score-list').innerHTML=entries.map(({team,score,count,details})=>`<li class="team-score ${team===selectedTeam()?'selected':''} ${mapTeamFilter===team?'filtered':''} ${mapTeamFilter&&mapTeamFilter!==team?'muted':''}" data-team="${team}" style="--score-team-color:${colors[team]}"><button class="team-score-filter" type="button" aria-describedby="filtered-score-${team}" aria-pressed="${mapTeamFilter===team}" aria-label="${team}: ${score===undefined?'points unavailable':`${score} points`}, ${count===null?'territory unavailable':`${count} squares held`}. Filter map to ${team}${team===selectedTeam()?', your planning team':''}" title="${details?`${details.tiles.toLocaleString()} squares + ${details.checkin_points.toLocaleString()} check-in + ${details.explorer_points.toLocaleString()} exploration points. `:'Total points unavailable. '}Click to show only ${team}; click again to show all teams."><span class="team-score-name"><i aria-hidden="true"></i>${team}${team===selectedTeam()?' · you':''}</span><strong>${score===undefined?'—':Number(score).toLocaleString(undefined,{maximumFractionDigits:2})}<span class="team-score-unit"> points</span></strong><span class="team-score-captures">${count===null?'—':Number(count).toLocaleString()} ${count===1?'square':'squares'} held</span><span id="filtered-score-${team}" class="team-score-filtered" hidden></span></button></li>`).join('');
+ updateFilteredTeamScores();
  $('team-score-list').querySelectorAll('button').forEach(button=>button.onclick=()=>setTeamMapFilter(button.closest('[data-team]').dataset.team));
  $('team-filter-clear').hidden=!mapTeamFilter;
  const source=$('team-scores-source');
@@ -1453,7 +1486,7 @@ function setSearching(active){
   progress.dataset.meshState=complete?'complete':'idle';
   progress.querySelector('.mesh-caption').textContent=complete?'Recon complete':'Standing by';
  }
- for(const id of ['mission-mode','draw-blocked-road','clear-blocked-roads','include-places','place-weight','place-remaining','draw-route-area','draw-route-polygon','team','start','end','start-lookup','end-lookup','budget','strategy','submit','print'])$(id).disabled=active;
+ for(const id of ['mission-mode','draw-blocked-road','clear-blocked-roads','include-places','place-weight','place-remaining','draw-route-area','draw-route-polygon','team','start','end','start-lookup','end-lookup','swap-endpoints','budget','strategy','submit','print'])$(id).disabled=active;
  $('submit').textContent=active ? 'Scouting routes…' : `Plan ${selectedTeam()} operation →`;
  $('submit').disabled=active||!boardAvailable;
  $('results').setAttribute('aria-busy',String(active));

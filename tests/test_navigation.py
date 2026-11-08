@@ -53,7 +53,7 @@ class NavigationTests(unittest.TestCase):
         params=parse_qs(urlparse(section['url']).query)
         self.assertEqual(len(params['waypoints'][0].split('|')),9)
         self.assertEqual(section['stops'][1:-1],via)
-        self.assertEqual(section['labels'],['A',*[f'W{i+1}' for i in range(9)],'B'])
+        self.assertEqual(section['labels'],['Start',*[f'W{i+1}' for i in range(9)],'Finish'])
 
     def test_ten_detours_split_without_losing_boundary_stop(self):
         via=[[-111.97+i*.001,41.21] for i in range(10)]
