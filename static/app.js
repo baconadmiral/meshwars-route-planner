@@ -1,5 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
+$('open-reports').onclick=()=>{window.location.href='/reports';};
 async function loadAppVersion(){
  const label=$('app-version');
  try{
