@@ -178,3 +178,5 @@ header{position:relative;border-top:3px solid var(--team-color,var(--accent));ba
 .team-score-filtered{display:block;font-size:10px;color:var(--text);margin-top:4px;white-space:normal}.team-score-filtered[hidden]{display:none}
 
 .app-version{font-size:10px;color:var(--muted);font-family:monospace;overflow-wrap:anywhere}
+
+.report-page-link{font-size:11px;white-space:nowrap;letter-spacing:0}
