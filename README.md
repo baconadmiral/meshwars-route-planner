@@ -2,6 +2,21 @@
 
 A self-hostable Meshtastic route planner with a territory map and printable, MapQuest-style turn-by-turn directions. It prioritizes easy-to-capture enemy squares and unpainted exploration within a maximum extra-driving-time budget.
 
+## Contribution rules for developers and Codex agents
+
+`main` is protected and deploys to the public website automatically. All changes, including documentation and workflow changes, must be made on a feature branch and merged through a GitHub pull request targeting `main`. Do not commit or push directly to `main`, bypass protections, force-push `main`, or delete it.
+
+1. Start from an up-to-date `main` and create a descriptive branch, for example `git switch -c feature/swap-endpoints`.
+2. Make focused changes and run the relevant checks. Describe the resulting behavior and validation in the pull request; include screenshots for interface changes and explain scoring changes.
+3. Push the feature branch and open a pull request targeting `main`.
+4. Both required GitHub Actions checks, `test` and `browser`, must pass. They belong to the **Container checks** workflow; the workflow name itself is not a required-check name. The branch must be up to date with `main` before merging, and review conversations must be resolved.
+5. Satisfy the repository's configured review requirements before merging. If an approval is required, obtain it from another reviewer; authors cannot approve their own pull requests. Do not weaken the ruleset to unblock a change.
+6. Merge the accepted pull request through GitHub. The push resulting from the merge triggers the production workflow: container tests → production image published to GHCR → Render deployment requested for that exact commit. Check GitHub Actions and Render Events for success; a successful deploy-hook request alone does not confirm a healthy rollout.
+
+The required pre-merge checks are `test` and `browser`, not `publish`: publishing runs after changes reach `main`. Keep the `main` ruleset **Active**, with no bypass entries, force pushes blocked, and branch deletion restricted. GitHub's active ruleset is authoritative for the current approval count; this README does not assume whether zero or one approval was selected.
+
+Agents must preserve these rules and report any access or failing-check blockers rather than pushing directly to `main`. Keep API keys, `.env`, and the Render deploy-hook URL out of commits, pull request text, and logs.
+
 ## Run locally
 
 Requires Python 3.10+ and an internet connection for address lookup, routing, map tiles, and the Leaflet map library. The local development server uses only the standard library. The hosted entry point and full test suite additionally use the pinned packages in `requirements.txt`.
