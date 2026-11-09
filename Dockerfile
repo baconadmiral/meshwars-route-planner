@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
 COPY *.py LICENSE ./
 COPY static/ ./static/
 ARG APP_REVISION=development
-ENV APP_REVISION=${APP_REVISION}
+ARG APP_CHANGES=[]
+ENV APP_REVISION=${APP_REVISION} APP_CHANGES=${APP_CHANGES}
 USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

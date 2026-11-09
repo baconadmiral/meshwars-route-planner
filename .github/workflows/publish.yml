@@ -22,6 +22,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Check deployment configuration
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
@@ -32,14 +34,18 @@ jobs:
           fi
       - name: Test container
         run: docker build --target test -t meshwars-route-planner:test .
+      - name: Prepare recent change notes
+        run: python3 app_version.py /tmp/meshwars-release-notes.json
       - name: Build production image
         env:
           REPOSITORY: ${{ github.repository }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
           IMAGE="ghcr.io/${REPOSITORY,,}"
+          APP_CHANGES="$(cat /tmp/meshwars-release-notes.json)"
           docker build --target production \
             --build-arg "APP_REVISION=$COMMIT_SHA" \
+            --build-arg "APP_CHANGES=$APP_CHANGES" \
             --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
             --label "org.opencontainers.image.revision=$COMMIT_SHA" \
             -t "$IMAGE:latest" -t "$IMAGE:sha-$COMMIT_SHA" .

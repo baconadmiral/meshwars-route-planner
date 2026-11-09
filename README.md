@@ -19,9 +19,9 @@ Agents must preserve these rules and report any access or failing-check blockers
 
 ## Deployed app version
 
-The header displays **Version `<12-character Git commit>`**. Hover over it for the full commit. Refresh after a deployment to see the running build's version; an already-open page does not automatically detect a new deployment. Each merge produces a different version without manually updating a release number.
+The header displays **Version `<12-character Git commit>`**. Hover over it for the full commit and the five most recent merged changes, or tap/click it to open the same notes in a dialog. Refresh after a deployment to see the running build's version; an already-open page does not automatically detect a new deployment. Each merge produces a different version without manually updating a release number.
 
-CI passes the full Git SHA into the production Docker image as the `APP_REVISION` build argument, independently of the GHCR image tag. `/api/version` returns the short `version` and full `revision` with caching disabled. Builds without a valid 40-character commit SHA show **Version development**. Existing images need to be rebuilt and deployed with this change before they can display a version. Do not set a fixed `APP_REVISION` in Render's environment, which would override the identity embedded by CI.
+CI passes the full Git SHA as `APP_REVISION` and recent first-parent commit titles as JSON in `APP_CHANGES` into the production Docker image, independently of the GHCR image tag. Standard GitHub merge commits use their PR title; squash and direct commits use their subject. No Git history is needed in the running container. `/api/version` returns the short `version` and full `revision` with caching disabled. Builds without a valid 40-character commit SHA show **Version development**. Existing images need to be rebuilt and deployed with this change before they can display a version. Do not set fixed `APP_REVISION` or `APP_CHANGES` values in Render's environment, which would override the identity embedded by CI.
 
 ## Install as an app (PWA)
 

@@ -25,7 +25,7 @@ const result={team:'BLUE',strategy:'greedy',routes:[fixture.route],baseline:fixt
     return intercepted.abort();
    }
    if(['/api/board','/api/board/status'].includes(url.pathname))return reply({available:true,coverage:[],coverage_count:0,source:'fixture',revision:'fixture',attribution:{configured:false}});
-   if(url.pathname==='/api/version')return reply({version:'development',revision:null});
+   if(url.pathname==='/api/version')return reply({version:'abcdef123456',revision:'abcdef123456'+'a'.repeat(28),changes:['Keep searches running when phones sleep','<b>Reports are text, not HTML</b>']});
    if(url.pathname==='/api/drives/status')return reply({configured:false});
    if(url.pathname==='/api/radio-coverage')return reply({available:false,configured:false,events:[]});
    if(url.pathname==='/api/players')return reply({available:false,players:[]});
@@ -49,6 +49,12 @@ const result={team:'BLUE',strategy:'greedy',routes:[fixture.route],baseline:fixt
   });
   await page.goto('http://localhost:8000/');
   await page.waitForFunction(()=>typeof map!=='undefined'&&map&&boardAvailable);
+  await page.locator('#app-version').click();
+  assert.equal(await page.locator('#version-dialog').getAttribute('open'),'');
+  assert.match(await page.locator('#app-version').getAttribute('title'),/Keep searches running when phones sleep/);
+  assert.equal(await page.locator('#version-changes li').count(),2);
+  assert.equal(await page.locator('#version-changes b').count(),0,'Change notes must be rendered as text');
+  await page.locator('#version-close').click();
   await page.locator('#start').fill('0, 0');await page.locator('#end').fill('0.02, 0.02');
   await page.locator('#submit').click();
   await page.locator('#search-dialog[open]').waitFor();

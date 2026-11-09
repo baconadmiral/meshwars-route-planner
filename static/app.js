@@ -9,13 +9,22 @@ async function loadAppVersion(){
   const data=await response.json();
   if(!data||!(data.version==='development'||/^[0-9a-f]{12}$/.test(data.version)))throw Error('Invalid version');
   label.textContent=`Version ${data.version}`;
-  label.title=data.revision?`Deployed Git commit: ${data.revision}. Refresh after a deployment to see the new version.`:'Local development build; no production commit was embedded.';
+  label.setAttribute('aria-label',`Version ${data.version}; recent changes`);
+  const changes=Array.isArray(data.changes)?data.changes.filter(item=>typeof item==='string').slice(0,5):[];
+  const revision=data.revision?`Deployed Git commit: ${data.revision}`:'Local development build; no production commit was embedded.';
+  label.title=revision+(changes.length?'\n\nRecent changes:\n'+changes.map(change=>'• '+change).join('\n'):'\nNo recent change notes are embedded in this build.');
+  $('version-revision').textContent=revision;
+  $('version-changes').replaceChildren(...changes.map(change=>{const item=document.createElement('li');item.textContent=change;return item;}));
+  $('version-empty').hidden=changes.length>0;
+  label.disabled=false;
  }catch{
   label.textContent='Version unavailable';
   label.title='Refresh to retry loading the deployed version.';
  }
 }
 loadAppVersion();
+$('app-version').onclick=()=>$('version-dialog').showModal();
+$('version-close').onclick=()=>$('version-dialog').close();
 
 let board = [], result = null, routeIndex = 0, clickCount = 0;
 let boardRevision=null,boardAvailable=false,feedMetadata=null,feedLoading=false,boardStartupChecks=0;

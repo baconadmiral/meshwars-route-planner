@@ -191,3 +191,5 @@ header{position:relative;border-top:3px solid var(--team-color,var(--accent));ba
 #search-dialog #cancel-search{min-height:44px;width:100%}
 body.search-modal-open{overflow:hidden}
 @media(prefers-reduced-motion:reduce){#search-dialog .mesh-packet,#search-dialog .mesh-nodes circle,#search-dialog .mesh-territory rect{animation:none}}
+
+#version-dialog{width:min(520px,calc(100vw - 24px));max-height:80dvh;padding:22px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);overflow:auto}#version-dialog::backdrop{background:#0008}#version-dialog h2{margin-top:0}#version-revision{font-size:11px;overflow-wrap:anywhere}#version-changes{padding-left:20px;line-height:1.6}#version-changes li{margin:10px 0}#version-close{min-height:44px}.header-actions .app-version{font-size:10px;padding:7px 9px}

@@ -69,10 +69,10 @@ class HostingTests(unittest.TestCase):
 
     def test_version_is_public_and_not_cached(self):
         revision = '303c9597cabbd714332efc804f33e96084c19f35'
-        with patch.dict('os.environ', {'APP_REVISION': revision}):
+        with patch.dict('os.environ', {'APP_REVISION': revision, 'APP_CHANGES': '[]'}):
             response = self.client.get('/api/version')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {'version': revision[:12], 'revision': revision})
+        self.assertEqual(response.get_json(), {'version': revision[:12], 'revision': revision, 'changes': []})
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
 
     def setUp(self):
