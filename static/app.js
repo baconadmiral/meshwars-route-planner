@@ -1430,7 +1430,7 @@ function renderSavedTrips(selected=''){
  $('saved-trip').innerHTML='<option value="">Select a saved trip…</option>'+savedTrips.map(t=>`<option value="${escape(t.id)}">${escape(t.name)}</option>`).join('');
  $('saved-trip').value=selected;
  $('save-trip').textContent=selected?'Save changes':'Save trip';
- $('load-trip').disabled=searching||!selected;$('delete-trip').disabled=searching||!selected;
+ $('share-trip').disabled=searching||!selected;$('load-trip').disabled=searching||!selected;$('delete-trip').disabled=searching||!selected;
 }
 function persistTrips(next,selected,message){
  try{localStorage.setItem(savedTripsKey,JSON.stringify(next));savedTrips=next;renderSavedTrips(selected);$('saved-trip-status').textContent=message;}
@@ -1487,7 +1487,79 @@ $('load-trip').onclick=()=>{
  applyTrip(trip);
  $('saved-trip-status').textContent=`Loaded “${trip.name}”. Review weekly place settings and search for fresh routes.`;
 };
+// Share only an explicit mission schema; never browser sessions, credentials, or API data.
+function sharedMission(value){
+ const fail=()=>{throw Error('Invalid or unsupported mission link.');};
+ const text=(v,max=500)=>{if(typeof v!=='string'||!v.trim()||v.length>max)fail();return v;};
+ const number=(v,min,max)=>{if(!['number','string'].includes(typeof v)||v===''||!Number.isFinite(+v)||+v<min||+v>max)fail();return +v;};
+ const point=p=>{if(!Array.isArray(p)||p.length!==2)fail();return [number(p[0],-180,180),number(p[1],-85,85)];};
+ if(!value||typeof value!=='object')fail();
+ const t=value;
+ if(!Object.hasOwn(colors,t.team)||!Object.hasOwn(missionModes,t.mission_mode)||!['beam','greedy','compare'].includes(t.strategy)||!Array.isArray(t.stops)||t.stops.length<2||t.stops.length>10)fail();
+ const stops=t.stops.map(stop=>({text:text(stop.text),selected:stop.selected?{label:text(stop.selected.label),coordinates:point(stop.selected.coordinates)}:null}));
+ let area=null;
+ if(t.area){
+  if(t.area.type==='Polygon'){
+   const ring=t.area.coordinates?.[0];if(!Array.isArray(ring)||ring.length<4||ring.length>101||t.area.coordinates.length!==1)fail();
+   const coords=ring.map(point);if(JSON.stringify(coords[0])!==JSON.stringify(coords.at(-1)))fail();area={type:'Polygon',coordinates:[coords]};
+  }else{
+   area={west:number(t.area.west,-180,180),east:number(t.area.east,-180,180),south:number(t.area.south,-85,85),north:number(t.area.north,-85,85)};
+   if(area.west>=area.east||area.south>=area.north)fail();
+  }
+ }
+ if(!Array.isArray(t.blocked_roads||[])||(t.blocked_roads||[]).length>10)fail();
+ const roads=(t.blocked_roads||[]).map(r=>{if(!Array.isArray(r.coordinates)||r.coordinates.length<2||r.coordinates.length>20)fail();return {coordinates:r.coordinates.map(point),buffer_meters:number(r.buffer_meters,5,100)};});
+ const places=t.places;if(!places||typeof places.enabled!=='boolean'||!Array.isArray(places.excluded)||places.excluded.length>2000||!places.excluded.every(v=>Number.isSafeInteger(v)&&v>=0)||!(places.week===null||typeof places.week==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(places.week)))fail();
+ return {name:text(t.name,80),team:t.team,mission_mode:t.mission_mode,stops,area,blocked_roads:roads,budget:number(t.budget,0,120),strategy:t.strategy,places:{enabled:places.enabled,weight:number(places.weight,0,5),remaining:number(places.remaining,0,100),excluded:places.excluded,week:places.week}};
+}
+async function encodeMission(trip){
+ const bytes=new TextEncoder().encode(JSON.stringify({version:1,mission:sharedMission(trip)}));
+ const compressed=new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+ return btoa(String.fromCharCode(...compressed)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
+}
+async function decodeMission(encoded){
+ if(encoded.length>64000||!/^[A-Za-z0-9_-]+$/.test(encoded))throw Error('Invalid mission link.');
+ const bytes=Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0));
+ const reader=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')).getReader();
+ let size=0,chunks=[];
+ try{while(true){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>100000){await reader.cancel();throw Error('Mission link is too large.');}chunks.push(value);}}finally{reader.releaseLock();}
+ const data=JSON.parse(await new Blob(chunks).text());if(data.version!==1)throw Error('Unsupported mission link version.');return sharedMission(data.mission);
+}
+let pendingSharedMission=null;
+function showMissionShare(title,message,link='',trip=null){
+ pendingSharedMission=trip;$('mission-share-title').textContent=title;$('mission-share-message').textContent=message;
+ $('mission-share-link').value=link;$('mission-share-link').hidden=!link;$('mission-share-copy').hidden=!link;
+ document.querySelector('label[for="mission-share-link"]').hidden=!link;
+ $('mission-share-import').hidden=!trip;$('mission-share-status').textContent='';$('mission-share-qr').replaceChildren();
+ if(link)drawQr($('mission-share-qr'),link,'Scan to import this saved mission');
+ $('mission-share-dialog').showModal();
+}
+$('share-trip').onclick=async()=>{
+ const trip=savedTrips.find(t=>t.id===$('saved-trip').value);if(!trip||searching)return;
+ try{
+  const url=new URL(location.href);url.search='';url.hash='mission='+await encodeMission(trip);
+  showMissionShare('Share mission',`Share “${trip.name}”. This link includes locations and mission settings. The recipient must be able to reach this planner address.`,url.href);
+ }catch{$('saved-trip-status').textContent='Could not create the share link. This browser must support gzip compression streams.';}
+};
+$('mission-share-copy').onclick=async()=>{try{await navigator.clipboard.writeText($('mission-share-link').value);$('mission-share-status').textContent='Link copied.';}catch{$('mission-share-link').select();$('mission-share-status').textContent='Select and copy the link above.';}};
+$('mission-share-close').onclick=()=>$('mission-share-dialog').close();
+$('mission-share-import').onclick=()=>{
+ if(!pendingSharedMission||searching)return;
+ if(savedTrips.length>=30){$('mission-share-status').textContent='Delete a saved mission first; this browser already has 30.';return;}
+ const trip={...pendingSharedMission,id:globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`};
+ persistTrips([...savedTrips,trip],trip.id,`Imported “${trip.name}”. Load it, review weekly place settings, then search for fresh routes.`);
+ if(savedTrips.some(t=>t.id===trip.id)){$('trip-name').value=trip.name;$('mission-share-dialog').close();$('sidebar-saved').scrollIntoView({block:'nearest'});}
+ else $('mission-share-status').textContent='Could not save the mission. Browser storage may be full or disabled.';
+};
+async function receiveSharedMission(){
+ if(!location.hash.startsWith('#mission='))return;
+ const encoded=location.hash.slice(9);history.replaceState(null,'',location.pathname+location.search);
+ try{const trip=await decodeMission(encoded);showMissionShare('Import shared mission',`Save “${trip.name}” (${missionModes[trip.mission_mode].name}, ${trip.stops.length} stops) as a new mission? Your current route stays unchanged. Review locations and weekly place settings before planning.`,'',trip);}
+ catch{showMissionShare('Cannot import mission','This mission link is invalid, too large, or unsupported by this browser.');}
+}
 renderSavedTrips();
+receiveSharedMission();
+window.addEventListener('hashchange',receiveSharedMission);
 const captureFilterHome=document.createComment('Capture age filter desktop location');
 $('sidebar-capture').before(captureFilterHome);
 const mobileMapFilter=window.matchMedia('(max-width: 800px)');
@@ -1634,8 +1706,8 @@ $('search-dialog').addEventListener('cancel',event=>{event.preventDefault();mini
 function setSearching(active){
  searching=active;
  if($('clear-displayed-route'))$('clear-displayed-route').disabled=active;
- for(const id of ['save-trip','saved-trip','trip-name'])$(id).disabled=active;
- $('load-trip').disabled=active||!$('saved-trip').value;$('delete-trip').disabled=active||!$('saved-trip').value;
+ for(const id of ['save-trip','share-trip','saved-trip','trip-name'])$(id).disabled=active;
+ $('share-trip').disabled=active||!$('saved-trip').value;$('load-trip').disabled=active||!$('saved-trip').value;$('delete-trip').disabled=active||!$('saved-trip').value;
  if(active){cancelAreaDrawing();cancelBlockedRoadDrawing();clearAddressPreview();setMapPickTarget(null);}
  $('clear-route-area').disabled=active||!allowedBounds;
  const progress=$('search-progress');
