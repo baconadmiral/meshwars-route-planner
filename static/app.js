@@ -1737,7 +1737,7 @@ async function validateTripArea(start,end,waypoints,signal){
  const data=await response.json();if(response.ok)return;
  const message=data.error||'Could not validate the trip area.';
  $('route-input-error').textContent=message;$('route-input-error').hidden=false;
- const ids=(data.outside_stops||[]).map(key=>key==='start'||key==='end'?key:waypointIds()[Number(key.slice(1))-1]).filter(Boolean);
+ const ids=(data.outside_stops||data.blocked_stops||[]).map(key=>key==='start'||key==='end'?key:waypointIds()[Number(key.slice(1))-1]).filter(Boolean);
  ids.forEach(id=>$(id).setAttribute('aria-invalid','true'));
  const error=Error(message);error.boundaryValidation=true;
  // Finish re-enabling the inputs before returning focus to the invalid stop.
@@ -1745,7 +1745,7 @@ async function validateTripArea(start,end,waypoints,signal){
 }
 async function planTrip(resuming=null){
  if(searching)return;
- let timer=null,invalidStop=null,completed=false;
+ let timer=null,invalidStop=null,completed=false,failed=false;
  clearStopErrors();
  try{
   planningRoute=true;progressMinimized=false;searchController=new AbortController();setSearching(true);updateMarkers();
@@ -1796,7 +1796,8 @@ async function planTrip(resuming=null){
   $('status').textContent=data.no_opportunities?(data.message||'No opportunities found for this mission within the budget.'):`${data.strategy==='beam'?'Beam':'Greedy'}: ${data.routes.length} route options within budget. ${data.routing_metrics?.workers||1} routing workers; average request ${data.routing_metrics?.mean_request_seconds||0}s (including queue/rate-limit waits). ${data.failed_candidates ? `${data.failed_candidates} detour requests failed. ` : ''}${data.mission_mode==='fortify'?'Amber outlines show reinforcement targets; reinforcement adds no immediate square-held points.':'Green outlines show mission targets; capture is not guaranteed.'}`;
  }catch(error){
   const cancelled=error.name==='AbortError';
-  invalidStop=error.invalidStop;
+  invalidStop=error.invalidStop;failed=!cancelled;
+  if(failed){$('route-input-error').textContent=error.message||'Route search failed. Please try again.';$('route-input-error').hidden=false;}
   $('status').textContent=cancelled?'Search cancelled. You can change the settings and try again.':error.message;
   $('progress-stage').textContent=cancelled?'Search cancelled':error.boundaryValidation?'Trip constraints need attention':'Search failed';
  }finally{
@@ -1804,6 +1805,7 @@ async function planTrip(resuming=null){
   searchController=null;setSearching(false);planningRoute=false;
   if(completed&&mobileSearch.matches)document.querySelector('.workspace').scrollIntoView({block:'start',behavior:'auto'});
   if(invalidStop){revealSidebarControl($(invalidStop));$(invalidStop)?.focus();}
+  else if(failed){revealSidebarControl($('route-input-error'));$('route-input-error').focus();$('route-input-error').scrollIntoView({block:'center',behavior:'auto'});}
  }
 }
 $('planner').addEventListener('submit',event=>{event.preventDefault();void planTrip();});

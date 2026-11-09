@@ -552,7 +552,8 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
                     report(3,'Finding a baseline around blocked roads (up to 12 bypass checks)…')
                     routes=find_bypass_routes(points,returned,blocked_roads,provider_router,allowed_bounds,progress=lambda done,total:report(3,f'Checking blocked-road bypass {done}/{total}…'))
                 if not routes and blocked_roads:
-                    raise ValueError('No accessible road route found around your blocked sections. Add a waypoint to guide the bypass, adjust the marks, or check whether the destination is reachable.')
+                    detail=(' Required waypoints '+', '.join(f'W{i+1}' for i in range(len(required)))+' must still be visited in order. A waypoint or its road access may force travel through a blocked section. Move the waypoint to an accessible road or adjust the blocked marks.' if required else ' Add a waypoint to guide the bypass, adjust the marks, or check whether the destination is reachable.')
+                    raise ValueError('No accessible road route found around your blocked sections within the bounded bypass checks.'+detail)
                 if not routes and allowed_bounds:
                     raise ValueError('No returned road route stays inside the drawn area. Enlarge or clear the area, or add waypoints to guide the route.')
                 prepared=[]

@@ -67,19 +67,26 @@ def route_blocked(route,roads):
     return any(hits_road(route['geometry']['coordinates'],road) for road in roads)
 
 
+class StopsOnBlockedRoad(ValueError):
+    def __init__(self,key,label,road):
+        self.stop_keys=[key]
+        super().__init__(f'{label} is on blocked road {road}. Move the stop or adjust the blocked section.')
+
+
 def validate_blocked_stops(start,end,waypoints,roads):
-    for label,point in [('Start (A)',start),*[(f'Waypoint W{i+1}',p) for i,p in enumerate(waypoints)],('Destination (B)',end)]:
+    for key,label,point in [('start','Start (A)',start),*[(f'W{i+1}',f'Waypoint W{i+1}',p) for i,p in enumerate(waypoints)],('end','Destination (B)',end)]:
         for i,road in enumerate(roads):
             if hits_road([point],road):
-                raise ValueError(f'{label} is on blocked road {i+1}. Move the stop or adjust the blocked section.')
+                raise StopsOnBlockedRoad(key,label,i+1)
 
 
-def bypass_proposals(points,road,bounds=None):
+def bypass_proposals(points,road,bounds=None,leg=None):
     coords=road['coordinates']
     center=[sum(p[i] for p in coords)/len(coords) for i in (0,1)]
     scale=max(.1,math.cos(math.radians(center[1])))
     def dist(a,b):return math.hypot((a[0]-b[0])*scale,a[1]-b[1])
-    leg=min(range(len(points)-1),key=lambda i:dist(points[i],center)+dist(center,points[i+1])-dist(points[i],points[i+1]))
+    if leg is None:
+        leg=min(range(len(points)-1),key=lambda i:dist(points[i],center)+dist(center,points[i+1])-dist(points[i],points[i+1]))
     for margin in (60,200,600):
         meters=margin+road['buffer_meters']
         west,east=min(p[0] for p in coords)-meters/(111320*scale),max(p[0] for p in coords)+meters/(111320*scale)
@@ -97,7 +104,15 @@ def find_bypass_routes(points,rejected,roads,router,bounds=None,limit=12,progres
     def add_proposals(chain,route):
         blocked=next((road for road in roads if hits_road(route['geometry']['coordinates'],road)),None)
         if blocked:
-            for proposal in bypass_proposals(chain,blocked,bounds):
+            # Curved roads can cross a closure on a different leg than endpoint
+            # proximity suggests. OSRM step geometry identifies the real leg.
+            leg=None
+            legs=route.get('legs',[])
+            if len(legs)==len(chain)-1:
+                leg=next((i for i,item in enumerate(legs)
+                          if any(hits_road(step.get('geometry',{}).get('coordinates',[]),blocked)
+                                 for step in item.get('steps',[]) if step.get('geometry',{}).get('coordinates'))),None)
+            for proposal in bypass_proposals(chain,blocked,bounds,leg=leg):
                 key=tuple(tuple(p) for p in proposal)
                 if key not in seen:seen.add(key);work.append(proposal)
     for route in rejected:add_proposals(points,route)
