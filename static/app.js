@@ -30,7 +30,7 @@ loadAppVersion();
 $('app-version').onclick=()=>$('version-dialog').showModal();
 $('version-close').onclick=()=>$('version-dialog').close();
 
-let board = [], result = null, routeIndex = 0, clickCount = 0;
+let board = [], result = null, routeIndex = 0;
 let boardRevision=null,boardAvailable=false,feedMetadata=null,feedLoading=false,boardStartupChecks=0;
 const colors = {BLUE:'#1656e8',RED:'#e44444',GREEN:'#2e9e65',PURPLE:'#8858be',YELLOW:'#d2a716',ORANGE:'#e88032',PINK:'#db6aa5'};
 const routeColors={BLUE:'#ffd43b',RED:'#00d4e8',GREEN:'#ff3ca0',PURPLE:'#ffd43b',YELLOW:'#ff3ca0',ORANGE:'#00d4e8',PINK:'#00d4e8'};
@@ -55,11 +55,12 @@ const refreshingSquares=new Map();
 let squareRefreshLayers=null,squareRefreshRenderer=null;
 const squareVersion=cell=>`${cell.cell_id}:${cell.owner_team}:${cell.captured_at??''}`;
 try{capturedSquaresHidden=localStorage.getItem('hide-captured-squares')==='true';}catch{}
-let searching = false, searchController = null, planningRoute = false;
+let searching = false, searchController = null, planningRoute = false, progressMinimized = false;
 const selectedLocations = {};
 let addressPreview=null;
 let tripLabels = null;
 let waypointCounter=0,mapPickTarget=null;
+let suppressMapPickUntil=0;
 let allowedBounds=null,areaDrawing=null,areaLayer=null,areaPreview=null;
 let blockedRoads=[],blockedRoadDrawing=null,blockedRoadLayer=null,blockedRoadPreview=null;
 $('cancel-search').onclick = () => searchController?.abort();
@@ -147,10 +148,18 @@ async function resolveLocation(id,signal){
  return null;
 }
 function bindLocation(id){
- $(id).addEventListener('input',()=>{if(mapPickTarget===id)mapPickTarget=null;clearAddress(id);if(markers)updateMarkers();});
+ $(id).addEventListener('input',()=>{
+  const wasSelecting=!!mapPickTarget;
+  setMapPickTarget(null);clearAddress(id);if(markers)updateMarkers();
+  if(wasSelecting)$('status').textContent='Map selection stopped. Enter a location, or select Map to pick a stop.';
+ });
+ if(id==='start'||id==='end'){
+  $(id).addEventListener('click',()=>pickEndpoint(id));
+  $(id+'-map').onclick=()=>pickEndpoint(id,true);
+ }
  $(id+'-lookup').onclick=async()=>{
   if(searching)return;
-  if(mapPickTarget===id)mapPickTarget=null;
+  setMapPickTarget(null);
   searchController=new AbortController();setSearching(true);
   $('search-progress').hidden=false;$('progress-bar').value=0;$('progress-percent').textContent='';
   $('progress-stage').textContent='Looking up address…';$('progress-time').textContent='Address lookup may take up to 15 seconds.';
@@ -172,7 +181,7 @@ $('swap-endpoints').onclick=()=>{
  $('start').value=endValue;$('end').value=startValue;
  if(endLocation&&endLocation.label===endValue.trim())selectedLocations.start=endLocation;
  if(startLocation&&startLocation.label===startValue.trim())selectedLocations.end=startLocation;
- if(mapPickTarget==='start'||mapPickTarget==='end')mapPickTarget=null;
+ setMapPickTarget(null);
  clearDisplayedRoute();
  if(markers)updateMarkers();
  $('status').textContent='Start and finish swapped. Plan again to find routes.';
@@ -185,6 +194,51 @@ function updateMarkers(){
  }
 }
 function waypointIds(){return [...document.querySelectorAll('#waypoints [data-waypoint]')].map(row=>row.dataset.waypoint);}
+function setMapPickTarget(id){
+ mapPickTarget=id;
+ if(id)suppressMapPickUntil=0;
+ for(const endpoint of ['start','end']){
+  $(endpoint).classList.toggle('map-pick-active',id===endpoint);
+  $(endpoint+'-map').setAttribute('aria-pressed',String(id===endpoint));
+ }
+ $('map-pick-banner').hidden=!id;
+ $('map').classList.toggle('map-picking',!!id);
+ if(id){
+  const name=id==='start'?'Start':id==='end'?'Finish':`W${waypointIds().indexOf(id)+1}`;
+  $('map-pick-message').textContent=`Tap the map to set ${name}.${id==='start'?' Then tap again to set Finish.':''} Dragging or scrolling will not place a stop.`;
+ }
+ document.querySelector('.workspace').dispatchEvent(new Event('routepanelchange'));
+}
+function pickEndpoint(id,scroll=false){
+ if(searching)return;
+ cancelAreaDrawing();cancelBlockedRoadDrawing();clearAddressPreview();
+ setMapPickTarget(id);
+ $('status').textContent=$('map-pick-message').textContent;
+ if(scroll){document.querySelector('.workspace').scrollIntoView({block:'start',behavior:'auto'});$('map').focus({preventScroll:true});}
+}
+$('cancel-map-pick').onclick=()=>{setMapPickTarget(null);$('status').textContent='Map selection cancelled. Your stops are unchanged.';};
+function guardMapGestures(){
+ const pointers=new Map(),element=$('map');
+ const suppress=()=>{suppressMapPickUntil=Date.now()+500;};
+ element.addEventListener('pointerdown',event=>{
+  if(!pointers.size)suppressMapPickUntil=0;
+  pointers.set(event.pointerId,{x:event.clientX,y:event.clientY,moved:false});
+  if(pointers.size>1){for(const point of pointers.values())point.moved=true;suppress();}
+ },{capture:true,passive:true});
+ window.addEventListener('pointermove',event=>{
+  const point=pointers.get(event.pointerId);if(!point)return;
+  if(Math.hypot(event.clientX-point.x,event.clientY-point.y)>8){point.moved=true;suppress();}
+ },{capture:true,passive:true});
+ const end=event=>{
+  const point=pointers.get(event.pointerId);
+  if(point&&(point.moved||event.type==='pointercancel'))suppress();
+  pointers.delete(event.pointerId);
+ };
+ window.addEventListener('pointerup',end,{capture:true,passive:true});
+ window.addEventListener('pointercancel',end,{capture:true,passive:true});
+ window.addEventListener('blur',()=>{if(pointers.size)suppress();pointers.clear();});
+ element.addEventListener('wheel',suppress,{capture:true,passive:true});
+}
 function revealSidebarControl(control){
  for(let parent=control?.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
 }
@@ -211,7 +265,7 @@ function refreshWaypointLabels(){
 function pickWaypoint(id){
  cancelAreaDrawing();cancelBlockedRoadDrawing();
  if(searching)return;
- mapPickTarget=id;
+ setMapPickTarget(id);
  const index=waypointIds().indexOf(id);
  $('status').textContent=`Click the map to set W${index+1}.`;
 }
@@ -225,7 +279,7 @@ function addWaypoint(pickOnMap=false){
  row.querySelector('.waypoint-map').onclick=()=>pickWaypoint(id);
  row.querySelector('.waypoint-remove').onclick=()=>{
   if(searching)return;
-  if(mapPickTarget===id)mapPickTarget=null;
+  if(mapPickTarget===id)setMapPickTarget(null);
   delete selectedLocations[id];row.remove();refreshWaypointLabels();
   $('status').textContent='Waypoint removed. Run a new search to update the route.';
  };
@@ -245,7 +299,7 @@ function addWaypoint(pickOnMap=false){
 $('add-waypoint').onclick=()=>addWaypoint();
 $('add-map-waypoint').onclick=()=>addWaypoint(true);
 document.addEventListener('keydown',event=>{
- if(event.key==='Escape' && mapPickTarget){mapPickTarget=null;$('status').textContent='Map waypoint selection cancelled.';}
+ if(event.key==='Escape' && mapPickTarget){setMapPickTarget(null);$('status').textContent='Map selection cancelled. Your stops are unchanged.';}
 });
 function holdingScore(cell){
  const value=cell?.scores?.[cell.owner_team];
@@ -904,7 +958,7 @@ function initPanelResize(){
  let ratio=.6,dragging=false,frame=null;
  try{const saved=Number(localStorage.getItem('blue-map-split'));if(saved>0 && saved<1)ratio=saved;}catch{}
  function bounds(){
-  const available=Math.max(0,workspace.clientHeight-divider.offsetHeight-$('map-filters').offsetHeight);
+  const available=Math.max(0,workspace.clientHeight-divider.offsetHeight-$('map-filters').offsetHeight-$('map-pick-banner').offsetHeight-$('search-running-banner').offsetHeight);
   const minimum=Math.min(160,available/2);
   return {available,minimum,maximum:Math.max(minimum,available-120)};
  }
@@ -933,7 +987,7 @@ function initPanelResize(){
  });
  divider.addEventListener('pointermove',event=>{
   if(!dragging)return;
-  apply(event.clientY-workspace.getBoundingClientRect().top-$('map-filters').offsetHeight-divider.offsetHeight/2);
+  apply(event.clientY-workspace.getBoundingClientRect().top-$('map-filters').offsetHeight-$('map-pick-banner').offsetHeight-$('search-running-banner').offsetHeight-divider.offsetHeight/2);
  });
  function finish(){
   if(!dragging)return;
@@ -952,7 +1006,7 @@ function initPanelResize(){
  });
  const resize=()=>apply(ratio*bounds().available);
  workspace.addEventListener('routepanelchange',resize);
- if(window.ResizeObserver){const observer=new ResizeObserver(resize);observer.observe(workspace);observer.observe($('map-filters'));}
+ if(window.ResizeObserver){const observer=new ResizeObserver(resize);observer.observe(workspace);observer.observe($('map-filters'));observer.observe($('map-pick-banner'));observer.observe($('search-running-banner'));}
  else window.addEventListener('resize',resize);
  window.addEventListener('beforeprint',redrawMap);
  window.addEventListener('afterprint',resize);
@@ -1098,7 +1152,7 @@ $('draw-blocked-road').onclick=()=>{
  if(searching)return;
  if(blockedRoadDrawing){cancelBlockedRoadDrawing();return;}
  if(blockedRoads.length>=10){$('blocked-road-status').textContent='Up to 10 road sections. Remove one before adding another.';return;}
- cancelAreaDrawing();drawBlockedRoads();mapPickTarget=null;blockedRoadDrawing=[];
+ cancelAreaDrawing();drawBlockedRoads();setMapPickTarget(null);blockedRoadDrawing=[];
  $('draw-blocked-road').textContent='Cancel marking';$('draw-blocked-road').setAttribute('aria-pressed','true');previewBlockedRoad();
 };
 $('undo-blocked-road').onclick=()=>{blockedRoadDrawing?.pop();previewBlockedRoad();};
@@ -1130,7 +1184,7 @@ function finishRouteAreaChange(){
 $('draw-route-area').onclick=()=>{
  cancelBlockedRoadDrawing();
  if(areaDrawing?.kind==='box'){cancelAreaDrawing();$('route-area-status').textContent='Drawing cancelled. The previous area, if any, is unchanged.';return;}
- cancelAreaDrawing();mapPickTarget=null;areaDrawing={kind:'box',corner:null};
+ cancelAreaDrawing();setMapPickTarget(null);areaDrawing={kind:'box',corner:null};
  $('draw-route-area').setAttribute('aria-pressed','true');
  $('draw-route-area').textContent='Cancel drawing';
  $('map').classList.add('drawing-route-area');
@@ -1139,7 +1193,7 @@ $('draw-route-area').onclick=()=>{
 $('draw-route-polygon').onclick=()=>{
  cancelBlockedRoadDrawing();
  if(areaDrawing?.kind==='polygon'){cancelAreaDrawing();$('route-area-status').textContent='Drawing cancelled. The previous area is unchanged.';return;}
- cancelAreaDrawing();mapPickTarget=null;areaDrawing={kind:'polygon',points:[]};
+ cancelAreaDrawing();setMapPickTarget(null);areaDrawing={kind:'polygon',points:[]};
  $('draw-route-polygon').setAttribute('aria-pressed','true');
  $('draw-route-polygon').textContent='Cancel drawing';
  $('map').classList.add('drawing-route-area');
@@ -1210,11 +1264,11 @@ function initCurrentLocation(){
  let locationLayer=null;
  control.onAdd=()=>{
   const container=L.DomUtil.create('div','current-location-control');
-  container.innerHTML='<button type="button" class="current-location-button" title="Zoom to your current location"><span aria-hidden="true">⌖</span> My location</button><p class="current-location-status" role="status" aria-live="polite" hidden></p>';
+  container.innerHTML='<button type="button" class="current-location-button" title="Zoom to your current location" aria-label="My location"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 1v4m0 14v4M1 12h4m14 0h4"/></svg><span class="current-location-label"> My location</span></button><p class="current-location-status" role="status" aria-live="polite" hidden></p>';
   L.DomEvent.disableClickPropagation(container);
   L.DomEvent.disableScrollPropagation(container);
   const button=container.querySelector('button'),status=container.querySelector('p');
-  const message=text=>{status.hidden=false;status.textContent=text;};
+  const message=(text,state='info')=>{status.hidden=false;status.textContent=text;status.dataset.state=state;};
   button.onclick=()=>{
    if(!window.isSecureContext){message('Location needs HTTPS or localhost.');return;}
    if(!navigator.geolocation){message('This browser does not support device location.');return;}
@@ -1230,7 +1284,7 @@ function initCurrentLocation(){
      L.circleMarker(point,{radius:7,color:'#fff',weight:3,fillColor:'#2463df',fillOpacity:1,interactive:false})
     ]).addTo(map);
     map.setView(point,16);
-    message(`Your location · accuracy about ${Math.round(accuracy).toLocaleString()} m`);
+    message(`Your location · accuracy about ${Math.round(accuracy).toLocaleString()} m`,'success');
    },error=>{
     finish();
     message(error.code===1?'Location access denied. Allow location in your browser settings and try again.':
@@ -1406,7 +1460,7 @@ $('delete-trip').onclick=()=>{
  persistTrips(savedTrips.filter(t=>t.id!==$('saved-trip').value),'','Trip deleted.');$('trip-name').value='';
 };
 function applyTrip(trip){
- cancelAreaDrawing();cancelBlockedRoadDrawing();mapPickTarget=null;clearAddressPreview();
+ cancelAreaDrawing();cancelBlockedRoadDrawing();setMapPickTarget(null);clearAddressPreview();
  for(const id of ['start',...waypointIds(),'end'])delete selectedLocations[id];
  $('waypoints').replaceChildren();
  for(let i=0;i<trip.stops.length-2;i++)addWaypoint();
@@ -1422,7 +1476,7 @@ function applyTrip(trip){
  allowedBounds=trip.area;
  if(areaLayer){map.removeLayer(areaLayer);areaLayer=null;}
  if(allowedBounds)areaLayer=(allowedBounds.type==='Polygon'?L.geoJSON(allowedBounds,{style:{color:'#f59e0b',weight:2,dashArray:'7 5',fillOpacity:.04,interactive:false}}):L.rectangle([[allowedBounds.south,allowedBounds.west],[allowedBounds.north,allowedBounds.east]],{color:'#f59e0b',weight:2,dashArray:'7 5',fillOpacity:.04,interactive:false})).addTo(map);
- finishRouteAreaChange();updateMarkers();clickCount=2;
+ finishRouteAreaChange();updateMarkers();
  const bounds=areaLayer?.getBounds()||(markers.getLayers().length?L.featureGroup(markers.getLayers()).getBounds():null);
  if(bounds?.isValid())map.fitBounds(bounds,{padding:[30,30],maxZoom:15});
  updateTeam();
@@ -1440,7 +1494,9 @@ const mobileMapFilter=window.matchMedia('(max-width: 800px)');
 const standaloneMapFilter=window.matchMedia('(display-mode: standalone)');
 function positionCaptureFilter(){
  const dock=$('map-filters'),filter=$('sidebar-capture');
- const aboveMap=mobileMapFilter.matches||standaloneMapFilter.matches||navigator.standalone===true;
+ const installed=standaloneMapFilter.matches||navigator.standalone===true;
+ document.documentElement.classList.toggle('standalone-app',installed);
+ const aboveMap=mobileMapFilter.matches||installed;
  if(aboveMap){dock.append(filter);dock.hidden=false;}
  else{captureFilterHome.after(filter);dock.hidden=true;}
  document.querySelector('.workspace').dispatchEvent(new Event('routepanelchange'));
@@ -1457,6 +1513,7 @@ async function init(){
  }
  if(!window.RouteSearch){startupState({error:'Some app files could not load. Check your connection and reload.'});return;}
  map=L.map('map',{preferCanvas:true}).setView([40.6,-111.9],10);
+ guardMapGestures();
  initCurrentLocation();
  const operationsLabel=L.control({position:'bottomleft'});
  operationsLabel.onAdd=()=>{
@@ -1511,21 +1568,20 @@ async function init(){
   else areaPreview=L.rectangle(bounds,{color:'#f59e0b',weight:2,dashArray:'7 5',fillOpacity:.06,interactive:false}).addTo(map);
  });
  map.on('click',e=>{
-  if(searching)return;
+  if(searching||Date.now()<suppressMapPickUntil)return;
   if(blockedRoadDrawing){
    if(blockedRoadDrawing.length>=20){$('blocked-road-status').textContent='Maximum 20 points. Finish this section or undo a point.';return;}
    blockedRoadDrawing.push(e.latlng);previewBlockedRoad();return;
   }
   if(handleAreaClick(e.latlng))return;
   if(mapPickTarget){
-   const id=mapPickTarget;mapPickTarget=null;
+   const id=mapPickTarget;
    clearAddress(id);$(id).value=`${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
-   updateMarkers();$('status').textContent=`Waypoint set. Add more stops or find ${selectedTeam()} opportunities.`;return;
+   setMapPickTarget(id==='start'?'end':null);
+   clearDisplayedRoute();updateMarkers();
+   $('status').textContent=id==='start'?'Start set. Tap the map once more to set Finish.':id==='end'?'Finish set. Map taps will no longer change your stops. Plan your route when ready.':`Waypoint set. Add more stops or find ${selectedTeam()} opportunities.`;
+   return;
   }
-  const id=clickCount%2===0?'start':'end';
-  if(clickCount%2===0){$('end').value='';clearAddress('end');}
-  clearAddress(id);$(id).value=`${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
-  clickCount++;updateMarkers();
  });
  ['start','end'].forEach(id=>$(id).addEventListener('change',updateMarkers));
  $('submit').disabled=true;
@@ -1548,7 +1604,8 @@ const mobileSearch=window.matchMedia('(max-width: 800px)');
 let progressHome=null;
 function presentSearchProgress(active){
  const panel=$('search-progress'),dialog=$('search-dialog');
- if(active&&planningRoute&&mobileSearch.matches){
+ if(!active)progressMinimized=false;
+ if(active&&planningRoute&&mobileSearch.matches&&!progressMinimized){
   if(!dialog.open){
    progressHome=panel.parentElement;
    document.querySelector('.workspace').scrollIntoView({block:'start',behavior:'auto'});
@@ -1560,16 +1617,26 @@ function presentSearchProgress(active){
   document.body.classList.remove('search-modal-open');
   if(progressHome){progressHome.append(panel);progressHome=null;}
  }
- panel.hidden=!active;
+ panel.hidden=!active||progressMinimized;
+ $('search-running-banner').hidden=!(active&&planningRoute&&progressMinimized);
+ $('hide-search-progress').hidden=!(active&&planningRoute);
 }
+function minimizeSearchProgress(){
+ if(!searching||!planningRoute)return;
+ progressMinimized=true;presentSearchProgress(true);
+ $('map').focus({preventScroll:true});
+ document.querySelector('.workspace').scrollIntoView({block:'start',behavior:'auto'});
+}
+$('hide-search-progress').onclick=minimizeSearchProgress;
+$('show-search-progress').onclick=()=>{if(searching){progressMinimized=false;presentSearchProgress(true);}};
 mobileSearch.addEventListener('change',()=>presentSearchProgress(searching));
-$('search-dialog').addEventListener('cancel',event=>{event.preventDefault();searchController?.abort();});
+$('search-dialog').addEventListener('cancel',event=>{event.preventDefault();minimizeSearchProgress();});
 function setSearching(active){
  searching=active;
  if($('clear-displayed-route'))$('clear-displayed-route').disabled=active;
  for(const id of ['save-trip','saved-trip','trip-name'])$(id).disabled=active;
  $('load-trip').disabled=active||!$('saved-trip').value;$('delete-trip').disabled=active||!$('saved-trip').value;
- if(active){cancelAreaDrawing();cancelBlockedRoadDrawing();clearAddressPreview();}
+ if(active){cancelAreaDrawing();cancelBlockedRoadDrawing();clearAddressPreview();setMapPickTarget(null);}
  $('clear-route-area').disabled=active||!allowedBounds;
  const progress=$('search-progress');
  if(active){progress.dataset.meshState='searching';progress.querySelector('.mesh-caption').textContent='Recon in progress';}
@@ -1578,7 +1645,7 @@ function setSearching(active){
   progress.dataset.meshState=complete?'complete':'idle';
   progress.querySelector('.mesh-caption').textContent=complete?'Recon complete':'Standing by';
  }
- for(const id of ['mission-mode','draw-blocked-road','clear-blocked-roads','include-places','place-weight','place-remaining','draw-route-area','draw-route-polygon','team','start','end','start-lookup','end-lookup','swap-endpoints','budget','strategy','submit','print'])$(id).disabled=active;
+ for(const id of ['mission-mode','draw-blocked-road','clear-blocked-roads','include-places','place-weight','place-remaining','draw-route-area','draw-route-polygon','team','start','end','start-lookup','end-lookup','start-map','end-map','swap-endpoints','budget','strategy','submit','print'])$(id).disabled=active;
  $('submit').textContent=active ? 'Scouting routes…' : `Plan ${selectedTeam()} operation →`;
  $('submit').disabled=active||!boardAvailable;
  $('results').setAttribute('aria-busy',String(active));
@@ -1609,7 +1676,8 @@ async function planTrip(resuming=null){
  let timer=null,invalidStop=null,completed=false;
  clearStopErrors();
  try{
-  planningRoute=true;searchController=new AbortController();setSearching(true);updateMarkers();
+  planningRoute=true;progressMinimized=false;searchController=new AbortController();setSearching(true);updateMarkers();
+  $('search-running-label').textContent='Search running…';
   $('search-progress').hidden=false;$('progress-bar').value=0;$('progress-percent').textContent='0%';
   $('progress-stage').textContent='Connecting to planner…';
   $('status').textContent='Search in progress. You can cancel at any time.';
@@ -1640,6 +1708,8 @@ async function planTrip(resuming=null){
    lastUpdate=Date.now();$('progress-bar').value=event.percent;
    $('progress-percent').textContent=`${Math.floor(event.percent)}%`;
    $('progress-stage').textContent=event.message;updateTime();
+   $('search-running-label').textContent=event.message.startsWith('Connection interrupted')?'Search retained · reconnecting…':`Search running · ${Math.floor(event.percent)}%`;
+   $('search-running-label').title=event.message;
   };
   const data=await (resuming?RouteSearch.resume(resuming,onProgress,searchController.signal):RouteSearch.start(payload,{labels:requestedLabels,trip:currentTrip()},onProgress,searchController.signal));
   result=data;tripLabels=requestedLabels;renderFeedStatus();

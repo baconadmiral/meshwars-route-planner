@@ -64,6 +64,21 @@ const result={team:'BLUE',strategy:'greedy',routes:[fixture.route],baseline:fixt
   await page.waitForFunction(()=>document.getElementById('progress-stage').textContent.includes('Connection interrupted'));
   const token=await page.evaluate(()=>RouteSearch.pending().token);
   assert.equal(creations,1);
+  await page.locator('#hide-search-progress').click();
+  assert.equal(await page.locator('#search-dialog').getAttribute('open'),null);
+  assert.equal(await page.locator('#search-running-banner').isVisible(),true);
+  const beforePan=await page.evaluate(()=>map.getCenter().lng);
+  const box=await page.locator('#map').boundingBox(),x=box.x+box.width*.7,y=box.y+box.height*.5;
+  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+60,y,{steps:6});await page.mouse.up();
+  assert.notEqual(await page.evaluate(()=>map.getCenter().lng),beforePan,'Hiding progress must allow map interaction');
+  assert.equal(await page.evaluate(()=>RouteSearch.pending().token),token);
+  await page.locator('#show-search-progress').click();
+  assert.equal(await page.locator('#search-dialog').getAttribute('open'),'');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#search-running-banner').isVisible(),true);
+  assert.equal(await page.evaluate(()=>searching),true,'Escape should hide progress, not cancel the job');
+  assert.equal(cancellations,0);
+  await page.screenshot({path:path.join(output,'mobile-search-minimized.png')});
   // Freeze after hiding, finish the server job, then wake the page.
   await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'});document.dispatchEvent(new Event('visibilitychange'));});
   const client=await page.context().newCDPSession(page);
@@ -76,6 +91,7 @@ const result={team:'BLUE',strategy:'greedy',routes:[fixture.route],baseline:fixt
   assert.ok(posts>=2,'Client should retry the same token after losing creation response');
   assert.equal(await page.locator('#search-dialog').getAttribute('open'),null);
   assert.equal(await page.locator('#search-progress').isVisible(),false);
+  assert.equal(await page.locator('#search-running-banner').isVisible(),false);
   assert.equal(await page.evaluate(()=>routeLayer.getLayers().length>0),true);
   assert.equal(await page.evaluate(()=>document.getElementById('map').getBoundingClientRect().top<innerHeight/2),true,'Completed route should be brought into view');
   await page.screenshot({path:path.join(output,'mobile-search-complete.png')});
@@ -125,13 +141,16 @@ const result={team:'BLUE',strategy:'greedy',routes:[fixture.route],baseline:fixt
   await page.waitForFunction(()=>RouteSearch.pending()?.submitted===true);
   assert.equal(await page.locator('#search-dialog').getAttribute('open'),null);
   assert.equal(await page.locator('#map #search-progress').isVisible(),true);
+  await page.locator('#hide-search-progress').click();
+  assert.equal(await page.locator('#search-running-banner').isVisible(),true);
   const desktop=await page.evaluate(()=>RouteSearch.pending().token);
   jobs.set(desktop,{state:'complete',result,progress:{percent:100,message:'Complete'}});
   await page.evaluate(()=>window.dispatchEvent(new Event('online')));
   await page.waitForFunction(()=>!searching);
   assert.equal(await page.locator('#search-progress').isVisible(),false);
+  assert.equal(await page.locator('#search-running-banner').isVisible(),false);
   assert.deepEqual(errors,[]);
   await page.close();
-  console.log('Passed resumable searches: lost POST, hidden/frozen page, reload recovery, cancellation, mobile modal/route focus and desktop cleanup.');
+  console.log('Passed resumable searches: lost POST, hidden/frozen page, reload recovery, cancellation, hide/reopen progress, map interaction, completion snap and desktop cleanup.');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
