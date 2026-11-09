@@ -203,3 +203,13 @@ body.search-modal-open{overflow:hidden}
 .search-running-banner{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;background:var(--soft);border-bottom:1px solid var(--border);font-size:12px}.search-running-banner[hidden]{display:none}.search-running-banner button{min-height:44px;padding:8px 10px;font-size:11px}.search-progress-actions{display:flex;gap:8px}.search-progress-actions button{flex:1;font-size:12px;padding:8px;min-height:44px}#search-dialog .search-progress-actions #cancel-search{width:auto}
 
 #mission-share-dialog{width:min(560px,calc(100vw - 32px));max-height:85dvh;overflow:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:24px}#mission-share-dialog::backdrop{background:#0009}#mission-share-dialog textarea{width:100%;box-sizing:border-box;overflow-wrap:anywhere}#mission-share-qr canvas{display:block;width:min(100%,340px);height:auto;margin:16px auto}#mission-share-dialog [hidden]{display:none}
+
+/* Keep capture-age gestures away from phone edges and make the thumb easy to grab. */
+.map-filter-dock .quick-capture-filter{padding-inline:16px}
+.map-filter-dock .quick-capture-filter label{font-size:14px}
+.map-filter-dock #capture-days{appearance:none;-webkit-appearance:none;height:48px;min-height:48px;touch-action:pan-y;background:transparent}
+.map-filter-dock #capture-days::-webkit-slider-runnable-track{height:10px;background:var(--border);border-radius:999px}
+.map-filter-dock #capture-days::-moz-range-track{height:10px;background:var(--border);border-radius:999px}
+.map-filter-dock #capture-days::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:32px;height:32px;margin-top:-11px;border:3px solid var(--surface);border-radius:50%;background:var(--accent);box-shadow:0 1px 4px #0005}
+.map-filter-dock #capture-days::-moz-range-thumb{width:26px;height:26px;border:3px solid var(--surface);border-radius:50%;background:var(--accent);box-shadow:0 1px 4px #0005}
+.map-filter-dock #capture-days:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:8px}

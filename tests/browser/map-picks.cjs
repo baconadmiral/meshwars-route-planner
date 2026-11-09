@@ -40,6 +40,21 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
    });
    await page.goto('http://localhost:8000/');
    await page.locator('#app-loading').waitFor({state:'hidden'});
+   if(scenario!=='desktop'){
+    const slider=page.locator('#capture-days');
+    await slider.scrollIntoViewIfNeeded();
+    const rangeBox=await slider.boundingBox();
+    assert.ok(rangeBox.height>=48,'Capture-age slider must have a 48px touch target');
+    assert.ok(rangeBox.x>=32&&rangeBox.x+rangeBox.width<=390-32,'Slider must be inset from both gesture edges');
+    assert.equal(await slider.evaluate(el=>getComputedStyle(el).touchAction),'pan-y');
+    await page.touchscreen.tap(rangeBox.x+rangeBox.width*.6,rangeBox.y+rangeBox.height/2);
+    assert.ok(Number(await slider.inputValue())>0,'Touching the larger track must change the capture age');
+    assert.notEqual(await page.locator('#capture-days-value').innerText(),'All time');
+    await page.screenshot({path:path.join(__dirname,'test-results',`capture-slider-${scenario}.png`)});
+    await slider.focus();await page.keyboard.press('Home');
+    assert.equal(await slider.inputValue(),'0');
+   }
+
    await page.locator('#start').fill('40.7, -111.9');await page.locator('#end').fill('40.8, -111.8');
    const values=()=>page.evaluate(()=>[document.getElementById('start').value,document.getElementById('end').value]);
    const original=await values();
