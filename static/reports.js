@@ -97,4 +97,10 @@ async function loadReport(){
  }finally{$('refresh-report').disabled=false;}
 }
 $('refresh-report').onclick=loadReport;
-loadReport();
+window.appStartupState={stage:'Preparing your territory report…'};
+window.dispatchEvent(new Event('app-startup'));
+let startupTimer;
+Promise.race([loadReport(),new Promise(resolve=>{startupTimer=setTimeout(resolve,5000);})]).finally(()=>{
+ clearTimeout(startupTimer);
+ window.appStartupState={ready:true};window.dispatchEvent(new Event('app-startup'));
+});

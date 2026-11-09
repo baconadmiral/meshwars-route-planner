@@ -176,6 +176,7 @@ class Handler(BaseHTTPRequestHandler):
                   '/reports': ('reports.html', 'text/html'), '/reports.js': ('reports.js', 'text/javascript'),
                   '/reports.css': ('reports.css', 'text/css')}
         assets['/search-client.js'] = ('search-client.js', 'text/javascript')
+        assets['/startup.js'] = ('startup.js', 'text/javascript')
         assets.update(PWA_ASSETS)
         if path not in assets:
             return self.send_error(404)
