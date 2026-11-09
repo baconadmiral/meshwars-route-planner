@@ -23,6 +23,16 @@ The header displays **Version `<12-character Git commit>`**. Hover over it for t
 
 CI passes the full Git SHA into the production Docker image as the `APP_REVISION` build argument, independently of the GHCR image tag. `/api/version` returns the short `version` and full `revision` with caching disabled. Builds without a valid 40-character commit SHA show **Version development**. Existing images need to be rebuilt and deployed with this change before they can display a version. Do not set a fixed `APP_REVISION` in Render's environment, which would override the identity embedded by CI.
 
+## Install as an app (PWA)
+
+The planner and reports can be installed from an HTTPS site, including the Render address, and open in a standalone app window. Chromium browsers show **Install app** in the header when they offer installation; their browser menu may also provide an install action. On iPhone/iPad, open the site in Safari and use **Share → Add to Home Screen**. Installation availability and wording depend on the browser. Local testing works on `localhost`; an ordinary HTTP LAN address is not a secure context for service-worker installation.
+
+The manifest (`/manifest.webmanifest`) defines the app name, standalone display, theme colors, icons, and a Reports shortcut. Shield/radio icons are supplied at 192 and 512 pixels, with a 180-pixel Apple touch icon. The editable source is `static/icons/icon.svg`; developers with the browser test dependencies installed can regenerate the PNGs using `node tests/browser/generate-icons.cjs` from the repository root.
+
+This is an **online app**. Routing, address lookup, live territory, reports, and map tiles need a connection. The service worker caches only a self-contained offline notice, shown when planner/report navigation fails without a network connection after a successful first visit. It does not cache pages, JavaScript, styles, APIs, route results, location inputs, GPX downloads, CDN libraries, or map tiles. Existing saved trips and drive sessions keep their existing browser-storage behavior. Clearing site data removes installation-related caches as well as those existing saved items.
+
+`/sw.js` embeds the production commit SHA, creating a separate offline-notice cache for each deployed build and cleaning up older caches with this app's prefix. Online navigation always uses the network, so refreshing loads the deployed version. Activating an updated worker does not automatically reload an open page or discard a trip in progress. The manifest and worker are served by both Python entry points with caching disabled. Actual installation into iOS/Android home screens still requires a manual device check; browser tests cover manifest/icons, installation prompt handling, worker lifecycle, offline fallback, and reconnection.
+
 ## Run locally
 
 Requires Python 3.10+ and an internet connection for address lookup, routing, map tiles, and the Leaflet map library. The local development server uses only the standard library. The hosted entry point and full test suite additionally use the pinned packages in `requirements.txt`.

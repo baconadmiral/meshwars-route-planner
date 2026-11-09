@@ -26,6 +26,7 @@ from route_bounds import validate_bounds, StopsOutsideArea
 from server import ROOT, ROUTING_WORKERS, SearchCancelled, fetch_routes, parse_plan_request
 from app_version import build_version
 from territory_reports import territory_report
+from pwa import PWA_ASSETS, service_worker
 from planner import search_routes
 
 
@@ -128,6 +129,15 @@ def create_app(runtime, search_limit=2):
     @app.get('/reports.css')
     def asset():
         return send_from_directory(ROOT/'static', request.path[1:])
+
+    def pwa_asset():
+        if request.path == '/sw.js':
+            return Response(service_worker(), mimetype='text/javascript')
+        name, content_type = PWA_ASSETS[request.path]
+        return send_from_directory(ROOT/'static', name, mimetype=content_type)
+
+    for path in PWA_ASSETS:
+        app.add_url_rule(path, endpoint='pwa_asset', view_func=pwa_asset)
 
     @app.get('/healthz')
     def health():
