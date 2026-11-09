@@ -31,7 +31,7 @@ select{width:100%;padding:12px;border:1px solid var(--border);border-radius:7px;
 @media screen and (max-width:800px){body{height:auto;min-height:100dvh}main{flex:none;overflow:visible}aside{overflow:visible}.workspace{height:80vh;height:80dvh;min-height:520px}#map-divider{flex-basis:36px}}
 @media print{body,main,.workspace{height:auto!important;overflow:visible!important}.workspace{display:block}#map-divider,#divider-help{display:none!important}#route-pane{height:auto;overflow:visible}#map{height:300px!important;min-height:0!important}}
 
-.header-actions{margin-left:auto;display:flex;align-items:center;gap:8px}.header-actions button{margin-left:0;white-space:nowrap}
+.header-actions{margin-left:auto;display:flex;flex-wrap:wrap;max-width:100%;align-items:center;gap:8px}.header-actions button{margin-left:0;white-space:nowrap}
 #theme-toggle[aria-pressed="true"]{background:var(--soft);border-color:var(--accent);color:var(--accent)}
 :root[data-theme="dark"] .primary{background:#2863df;border-color:#4c83ed;color:#fff}
 :root[data-theme="dark"] .brand{color:var(--team-color)}
@@ -180,3 +180,5 @@ header{position:relative;border-top:3px solid var(--team-color,var(--accent));ba
 .app-version{font-size:10px;color:var(--muted);font-family:monospace;overflow-wrap:anywhere}
 
 .report-page-link{font-size:11px;white-space:nowrap;letter-spacing:0}
+
+[data-install-app][hidden]{display:none!important}

@@ -2,6 +2,7 @@
 import argparse
 from app_version import build_version
 from territory_reports import territory_report
+from pwa import PWA_ASSETS, service_worker
 import json
 import math
 import os
@@ -168,10 +169,11 @@ class Handler(BaseHTTPRequestHandler):
         assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css'),
                   '/reports': ('reports.html', 'text/html'), '/reports.js': ('reports.js', 'text/javascript'),
                   '/reports.css': ('reports.css', 'text/css')}
+        assets.update(PWA_ASSETS)
         if path not in assets:
             return self.send_error(404)
         name, content_type = assets[path]
-        body = (ROOT/'static'/name).read_bytes()
+        body = service_worker().encode() if path == '/sw.js' else (ROOT/'static'/name).read_bytes()
         self.send_response(200)
         self.send_header('Content-Type', content_type)
         self.send_header('Cache-Control', 'no-store')
