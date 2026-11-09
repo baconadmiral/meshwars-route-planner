@@ -344,6 +344,41 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
     await page.fill('#trip-name','Updated loop');await page.locator('#save-trip').click();
     assert.equal(await page.locator('#saved-trip option').count(),2);
     assert.equal(await page.locator('#saved-trip option').nth(1).innerText(),'Updated loop');
+    await page.locator('#share-trip').click();
+    await page.locator('#mission-share-dialog').waitFor({state:'visible'});
+    await page.screenshot({path:'test-results/mission-share.png'});
+    const missionLink=await page.locator('#mission-share-link').inputValue();
+    assert.ok(missionLink.includes('#mission='));
+    assert.equal(await page.locator('#mission-share-qr canvas').count(),1);
+    const shared=await page.evaluate(async link=>decodeMission(new URL(link).hash.slice(9)),missionLink);
+    assert.equal(shared.name,'Updated loop');assert.equal(shared.mission_mode,'fortify');
+    assert.deepEqual(shared.area,polygon);assert.equal(shared.blocked_roads.length,1);
+    assert.deepEqual(shared.stops[0].selected.coordinates,[.001,.001]);
+    assert.equal(shared.id,undefined);assert.equal(shared.api_key,undefined);
+    await page.locator('#mission-share-close').click();
+    await page.goto(missionLink);await page.waitForFunction(()=>map&&boardAvailable);
+    await page.locator('#mission-share-import').waitFor({state:'visible'});
+    assert.equal(await page.locator('#saved-trip option').count(),2);
+    await page.locator('#mission-share-import').click();
+    assert.equal(await page.locator('#saved-trip option').count(),3);
+    const importedId=await page.locator('#saved-trip').inputValue();assert.notEqual(importedId,savedId);
+    await page.locator('#load-trip').click();
+    assert.equal(await page.locator('#mission-mode').inputValue(),'fortify');
+    assert.deepEqual(await page.evaluate(()=>allowedBounds),polygon);
+    await page.evaluate(()=>{location.hash='mission=broken';});
+    await page.locator('#mission-share-dialog').waitFor({state:'visible'});
+    assert.match(await page.locator('#mission-share-title').innerText(),/Cannot import/);
+    await page.locator('#mission-share-close').click();
+    await page.evaluate(()=>{
+     const source=savedTrips[0];
+     for(const change of [{budget:999},{stops:[]},{area:{west:2,east:1,south:0,north:1}},{mission_mode:'__proto__'}]){
+      let rejected=false;try{sharedMission({...source,...change});}catch{rejected=true;}if(!rejected)throw Error('Invalid mission accepted');
+     }
+    });
+    await page.evaluate(()=>document.getElementById('saved-trip-manage').open=true);
+    await page.locator('#delete-trip').click();
+    await page.selectOption('#saved-trip',savedId);
+    console.log('Passed mission sharing: compressed QR/link, import copy, settings roundtrip, invalid payload rejection.');
     await page.locator('#delete-trip').click();
     assert.equal(await page.locator('#saved-trip option').count(),1);
     assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem(savedTripsKey)).length),0);

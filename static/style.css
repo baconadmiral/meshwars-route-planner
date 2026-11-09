@@ -201,3 +201,5 @@ body.search-modal-open{overflow:hidden}
 .current-location-button .current-location-label{font-size:12px;line-height:1.2}
 
 .search-running-banner{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;background:var(--soft);border-bottom:1px solid var(--border);font-size:12px}.search-running-banner[hidden]{display:none}.search-running-banner button{min-height:44px;padding:8px 10px;font-size:11px}.search-progress-actions{display:flex;gap:8px}.search-progress-actions button{flex:1;font-size:12px;padding:8px;min-height:44px}#search-dialog .search-progress-actions #cancel-search{width:auto}
+
+#mission-share-dialog{width:min(560px,calc(100vw - 32px));max-height:85dvh;overflow:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:24px}#mission-share-dialog::backdrop{background:#0009}#mission-share-dialog textarea{width:100%;box-sizing:border-box;overflow-wrap:anywhere}#mission-share-qr canvas{display:block;width:min(100%,340px);height:auto;margin:16px auto}#mission-share-dialog [hidden]{display:none}
