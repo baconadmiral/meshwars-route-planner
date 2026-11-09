@@ -49,11 +49,11 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
     }
     if(url.pathname==='/api/radio-coverage')return reply({events:[],configured:false,available:false});
     if(url.pathname==='/api/validate-route-area')return intercepted.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'Start (A), Waypoint W1, Destination (B) must be inside the route area.',outside_stops:['start','W1','end']})});
-    if(url.pathname==='/api/plan-stream'){planRequests++;return intercepted.abort();}
+    if(url.pathname==='/api/plan-stream'||url.pathname.startsWith('/api/searches/')){planRequests++;return intercepted.abort();}
     if(url.pathname==='/api/route-export')return reply(fixture.export);
     if(url.pathname==='/api/gpx-shares')return reply({download_path:'/api/gpx-shares/test.gpx',expires_at:Date.now()/1000+3600});
     const name=url.pathname==='/'?'index.html':url.pathname.slice(1);
-    if(['index.html','app.js','style.css'].includes(name))return intercepted.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(root,'static',name))});
+    if(['index.html','app.js','search-client.js','style.css'].includes(name))return intercepted.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(root,'static',name))});
     return intercepted.abort();
    });
    await page.goto('http://localhost:8000/');

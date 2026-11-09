@@ -85,6 +85,28 @@ def run():
             assert events[-1]['type']=='result'
             assert events[-1]['team']=='RED'
             assert events[-1]['routes']
+            # Background jobs finish after their creation connection closes.
+            token='a'*64
+            job_request=Request(url+'/api/searches/'+token,data=json.dumps(payload).encode(),
+                                headers={'Content-Type':'application/json'})
+            with urlopen(job_request,timeout=5) as response:
+                assert response.status==202
+                created=json.load(response)
+            deadline=time.monotonic()+5
+            while True:
+                job=get('/api/searches/'+token)
+                if job['state']!='running':break
+                assert time.monotonic()<deadline, 'Background search did not finish.'
+                time.sleep(.05)
+            assert job['state']=='complete'
+            assert job['result']['team']=='RED' and job['result']['routes']
+            assert job['result']['board_revision']==events[-1]['board_revision']
+            with urlopen(job_request,timeout=5) as response:
+                assert json.load(response)['created_at']==created['created_at'], 'Retry duplicated a search.'
+            cancel_request=Request(url+'/api/searches/'+'b'*64+'/cancel',data=b'{}',
+                                   headers={'Content-Type':'application/json'})
+            with urlopen(cancel_request,timeout=5) as response:
+                assert json.load(response)['state']=='cancelled'
             track=dict(events[-1]['routes'][0],team='RED')
             share_request=Request(url+'/api/gpx-shares',data=json.dumps({'route':track}).encode(),
                                   headers={'Content-Type':'application/json'})
@@ -105,7 +127,7 @@ def run():
                 process.kill();process.communicate();raise
             provider.shutdown();provider.server_close()
         assert process.returncode==0, 'Hosted server failed graceful shutdown.'
-    print('Hosted socket smoke passed: startup, health, readiness, live cache, streamed route, GPX share/download, static UI, SIGTERM.')
+    print('Hosted socket smoke passed: startup, health, readiness, live cache, streamed and resumable routes, idempotent retry, cancellation, GPX share/download, static UI, SIGTERM.')
 
 
 if __name__=='__main__':run()
