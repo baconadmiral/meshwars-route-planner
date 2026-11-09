@@ -23,7 +23,7 @@ from capture_users import CaptureUsers
 from drive_reports import DriveReports
 from square_api import SquareAPI
 from mission_modes import validate_mission_mode
-from road_blocks import validate_blocked_roads, validate_blocked_stops
+from road_blocks import validate_blocked_roads, validate_blocked_stops, StopsOnBlockedRoad
 from navigation import build_export
 from gpx_shares import GPXShares, ShareCapacityError
 from teams import validate_team
@@ -273,6 +273,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(result)
         except SearchJobError as error:
             return self.send_json({'error': str(error)}, error.status)
+        except StopsOnBlockedRoad as error:
+            return self.send_json({'error':str(error),'blocked_stops':error.stop_keys},400)
         except StopsOutsideArea as error:
             return self.send_json({'error':str(error),'outside_stops':error.stop_keys},400)
         except ShareCapacityError as error:

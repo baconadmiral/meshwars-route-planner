@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 from planner import search_routes
-from road_blocks import validate_blocked_roads, route_blocked, validate_blocked_stops, hits_road
+from road_blocks import validate_blocked_roads, route_blocked, validate_blocked_stops, hits_road, find_bypass_routes, StopsOnBlockedRoad
 from route_bounds import route_inside
 
 START=[-.01,0]
@@ -73,3 +73,34 @@ class RoadBlockTests(unittest.TestCase):
         bounds={'west':-.02,'east':.02,'south':-.0005,'north':.0005}
         with self.assertRaisesRegex(ValueError,'No accessible road route'):
             search_routes(START,END,[],600,lambda *args:[road([START,END])],blocked_roads=[BLOCK],allowed_bounds=bounds)
+
+    def test_curved_waypoint_leg_gets_bypass_instead_of_nearest_chord(self):
+        waypoint=[-.005,.01]
+        points=[START,waypoint,END]
+        crossing=[START,[0,0],waypoint]
+        safe_second=[waypoint,[.005,.01],END]
+        rejected=road(crossing+safe_second[1:])
+        rejected['legs']=[{'steps':[{'geometry':{'coordinates':crossing}}]},
+                          {'steps':[{'geometry':{'coordinates':safe_second}}]}]
+        calls=[]
+        def router(chain,alternatives=False):
+            calls.append(chain)
+            if chain.index(waypoint)==1:return [rejected]
+            return [road(chain)]
+        routes=find_bypass_routes(points,[rejected],[BLOCK],router)
+        self.assertTrue(routes)
+        self.assertLessEqual(len(calls),12)
+        self.assertEqual(calls[0].index(waypoint),3)
+        self.assertTrue(all(chain.index(waypoint)>=3 for chain in calls))
+        self.assertTrue(all(not route_blocked(r,[BLOCK]) for r in routes))
+        self.assertTrue(all(waypoint in r['_avoidance_via'] for r in routes))
+
+    def test_blocked_waypoint_has_machine_readable_stop_identity(self):
+        with self.assertRaises(StopsOnBlockedRoad) as caught:
+            validate_blocked_stops(START,END,[[0,0]],[BLOCK])
+        self.assertEqual(caught.exception.stop_keys,['W1'])
+
+    def test_unreachable_waypoint_error_explains_mandatory_stops(self):
+        with self.assertRaisesRegex(ValueError,'Required waypoints W1 must still be visited'):
+            search_routes(START,END,[],600,lambda *args:[road([START,END])],
+                          waypoints=[[-.005,0]],blocked_roads=[BLOCK])

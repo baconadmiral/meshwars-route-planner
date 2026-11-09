@@ -22,6 +22,7 @@ from geocoder import lookup_address
 from navigation import build_export
 from gpx_shares import GPXShares, ShareCapacityError
 from radio_coverage import RadioCoverage, annotate_routes
+from road_blocks import StopsOnBlockedRoad
 from route_bounds import validate_bounds, StopsOutsideArea
 from server import ROOT, ROUTING_WORKERS, SearchCancelled, fetch_routes, parse_plan_request
 from app_version import build_version
@@ -101,6 +102,8 @@ def create_app(runtime, search_limit=2):
     def error_response(error):
         if isinstance(error, SearchJobError):
             return jsonify(error=str(error)), error.status, ({'Retry-After': '10'} if error.status == 429 else {})
+        if isinstance(error, StopsOnBlockedRoad):
+            return jsonify(error=str(error),blocked_stops=error.stop_keys),400
         if isinstance(error, StopsOutsideArea):
             return jsonify(error=str(error),outside_stops=error.stop_keys),400
         if isinstance(error, ShareCapacityError):

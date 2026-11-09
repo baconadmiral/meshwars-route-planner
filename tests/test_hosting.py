@@ -264,6 +264,18 @@ class HostingTests(unittest.TestCase):
             self.assertIn('Destination (B)',data['error'])
             router.assert_not_called()
 
+    def test_blocked_waypoint_preflight_returns_stop_identity(self):
+        body={'start':[-.01,0],'end':[.01,0],'waypoints':[[0,0]],
+              'blocked_roads':[{'coordinates':[[0,-.001],[0,.001]],'buffer_meters':20}]}
+        for endpoint in ('/api/plan','/api/plan-stream','/api/validate-route-area'):
+            with patch('hosting.fetch_routes') as router:
+                response=self.client.post(endpoint,json=body)
+            self.assertEqual(response.status_code,400)
+            data=response.get_json()
+            self.assertEqual(data['blocked_stops'],['W1'])
+            self.assertIn('Waypoint W1 is on blocked road 1',data['error'])
+            router.assert_not_called()
+
     def test_upstream_error_is_stream_event_and_releases_slot(self):
         with patch('hosting.fetch_routes',side_effect=OSError('private upstream detail')):
             response=self.client.post('/api/plan-stream',json=self.payload)
