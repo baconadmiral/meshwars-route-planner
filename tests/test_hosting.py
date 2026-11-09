@@ -15,6 +15,45 @@ def route(points):
 
 
 class HostingTests(unittest.TestCase):
+    def test_resumable_search_survives_closed_response_and_is_idempotent(self):
+        began, finish = threading.Event(), threading.Event()
+        token='a'*64
+        def searching(*args,progress,**kwargs):
+            progress({'percent':10,'message':'Searching'})
+            began.set();finish.wait(2)
+            progress({'percent':90,'message':'Finishing'})
+            return {'routes':[], 'team':'ORANGE', 'baseline':{'geometry':{'coordinates':[[0,0],[.01,.01]]},'target_ids':[]}}
+        try:
+            with patch('hosting.search_routes',side_effect=searching) as search:
+                response=self.client.post('/api/searches/'+token,json=self.payload)
+                self.assertEqual(response.status_code,202);response.close()
+                self.assertTrue(began.wait(1))
+                retry=self.client.post('/api/searches/'+token,json=self.payload)
+                self.assertEqual(retry.status_code,202)
+                self.assertEqual(search.call_count,1)
+                self.assertEqual(self.client.post('/api/plan',json=self.payload).status_code,429)
+                finish.set()
+                for _ in range(100):
+                    state=self.client.get('/api/searches/'+token).get_json()
+                    if state['state']=='complete':break
+                    time.sleep(.01)
+                self.assertEqual(state['state'],'complete')
+                self.assertEqual(state['result']['board_revision'],'fixed')
+                self.assertEqual(search.call_count,1)
+        finally:finish.set()
+        self.assertEqual(self.client.get('/api/searches/'+'b'*64).status_code,404)
+        self.assertEqual(self.client.get('/api/searches/invalid').status_code,400)
+
+    def test_resumable_cancellation_rejects_cross_origin_and_stops_work(self):
+        token='c'*64
+        rejected=self.client.post('/api/searches/'+token+'/cancel',json={},headers={'Origin':'https://elsewhere.example'})
+        self.assertEqual(rejected.status_code,403)
+        self.assertEqual(self.client.post('/api/searches/'+token+'/cancel',json={}).get_json()['state'],'cancelled')
+        with patch('hosting.search_routes') as search:
+            response=self.client.post('/api/searches/'+token,json=self.payload)
+            self.assertEqual(response.get_json()['state'],'cancelled')
+            search.assert_not_called()
+
     def test_reports_use_cached_board_and_serve_page_assets(self):
         response = self.client.get('/api/reports/territory')
         self.assertEqual(response.status_code, 200)

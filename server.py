@@ -3,6 +3,7 @@ import argparse
 from app_version import build_version
 from territory_reports import territory_report
 from pwa import PWA_ASSETS, service_worker
+from search_jobs import SearchJobs, SearchJobError
 import json
 import math
 import os
@@ -134,6 +135,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith('/api/searches/'):
+            try:
+                return self.send_json(self.server.search_jobs.get(path[len('/api/searches/'):]))
+            except SearchJobError as error:
+                return self.send_json({'error': str(error)}, error.status)
         if path == '/api/version':
             return self.send_json(build_version())
         if path == '/api/reports/territory':
@@ -169,6 +175,7 @@ class Handler(BaseHTTPRequestHandler):
         assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css'),
                   '/reports': ('reports.html', 'text/html'), '/reports.js': ('reports.js', 'text/javascript'),
                   '/reports.css': ('reports.css', 'text/css')}
+        assets['/search-client.js'] = ('search-client.js', 'text/javascript')
         assets.update(PWA_ASSETS)
         if path not in assets:
             return self.send_error(404)
@@ -182,7 +189,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path not in ('/api/plan', '/api/plan-stream', '/api/geocode', '/api/board/refresh', '/api/route-export', '/api/validate-route-area', '/api/gpx-shares', '/api/drives/start', '/api/drives/report'):
+        search_path = self.path.startswith('/api/searches/')
+        if not search_path and self.path not in ('/api/plan', '/api/plan-stream', '/api/geocode', '/api/board/refresh', '/api/route-export', '/api/validate-route-area', '/api/gpx-shares', '/api/drives/start', '/api/drives/report'):
             return self.send_error(404)
         streaming = False
         try:
@@ -191,6 +199,15 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= limit:
                 raise ValueError('Invalid request size.')
             data = json.loads(self.rfile.read(length))
+            if search_path:
+                origin = self.headers.get('Origin')
+                if origin and urlparse(origin).netloc != self.headers.get('Host'):
+                    return self.send_json({'error': 'Cross-origin requests are not allowed.'}, 403)
+                if not isinstance(data, dict):
+                    raise ValueError('Expected a JSON object.')
+                token = self.path[len('/api/searches/'):]
+                if token.endswith('/cancel'):
+                    return self.send_json(self.server.search_jobs.cancel(token[:-len('/cancel')]))
             if self.path in ('/api/drives/start','/api/drives/report'):
                 if not isinstance(data,dict):raise ValueError('Expected a JSON object.')
                 action=self.server.drives.start if self.path.endswith('/start') else self.server.drives.report
@@ -221,6 +238,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({'error': 'No board data available yet. Wait for the feed or provide --board.'}, 503)
             coverage = board_snapshot['coverage']
             radio_snapshot = self.radio_snapshot()
+            if search_path:
+                def run(progress):
+                    result = search_routes(start, end, coverage, budget, fetch_routes,
+                                           progress=progress, strategy=strategy, workers=ROUTING_WORKERS,
+                                           waypoints=required_waypoints, team=team, allowed_bounds=allowed_bounds,
+                                           places_loader=places_feed.load if places_feed else None,
+                                           place_options=bonus_options, blocked_roads=data.get('blocked_roads'),
+                                           mission_mode=data.get('mission_mode', 'balanced'))
+                    annotate_routes(result, radio_snapshot)
+                    result['board_revision'] = board_snapshot.get('revision')
+                    return result
+                return self.send_json(self.server.search_jobs.start(token, data, run), 202)
             if self.path == '/api/plan-stream':
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/x-ndjson')
@@ -241,6 +270,8 @@ class Handler(BaseHTTPRequestHandler):
             annotate_routes(result, radio_snapshot)
             result['board_revision'] = board_snapshot.get('revision')
             return self.send_json(result)
+        except SearchJobError as error:
+            return self.send_json({'error': str(error)}, error.status)
         except StopsOutsideArea as error:
             return self.send_json({'error':str(error),'outside_stops':error.stop_keys},400)
         except ShareCapacityError as error:
@@ -280,6 +311,7 @@ def main():
     except ValueError as error:
         parser.error(str(error))
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+    server.search_jobs = SearchJobs()
     server.radio_coverage = RadioCoverage(ROOT/'.cache'/'radio_coverage.json',
                                           token=os.environ.get('FREQMAPPER_PARTNER_TOKEN'),
                                           region=os.environ.get('FREQMAPPER_REGION', 'SLC'))
@@ -293,6 +325,7 @@ def main():
     try:
         server.serve_forever()
     finally:
+        server.search_jobs.stopping.set()
         server.radio_coverage.close()
         feed.close()
         server.server_close()

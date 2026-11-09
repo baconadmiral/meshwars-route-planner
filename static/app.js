@@ -39,7 +39,7 @@ const refreshingSquares=new Map();
 let squareRefreshLayers=null,squareRefreshRenderer=null;
 const squareVersion=cell=>`${cell.cell_id}:${cell.owner_team}:${cell.captured_at??''}`;
 try{capturedSquaresHidden=localStorage.getItem('hide-captured-squares')==='true';}catch{}
-let searching = false, searchController = null;
+let searching = false, searchController = null, planningRoute = false;
 const selectedLocations = {};
 let addressPreview=null;
 let tripLabels = null;
@@ -1370,6 +1370,10 @@ $('saved-trip').onchange=()=>{
  const trip=savedTrips.find(t=>t.id===$('saved-trip').value);
  $('trip-name').value=trip?.name||'';renderSavedTrips(trip?.id||'');
 };
+function currentTrip(){
+ const ids=['start',...waypointIds(),'end'];
+ return {team:selectedTeam(),mission_mode:$('mission-mode').value,stops:ids.map(id=>({text:$(id).value,selected:selectedLocations[id]||null})),area:allowedBounds,blocked_roads:structuredClone(blockedRoads),budget:$('budget').value,strategy:$('strategy').value,places:{enabled:$('include-places').checked,weight:$('place-weight').value,remaining:$('place-remaining').value,excluded:[...excludedPlaceIds],week:placeScoringWeek}};
+}
 $('save-trip').onclick=()=>{
  if(searching)return;
  const name=$('trip-name').value.trim();
@@ -1378,16 +1382,14 @@ $('save-trip').onclick=()=>{
  if(ids.some(id=>!$(id).value.trim())){$('saved-trip-status').textContent='Enter a start, destination, and each waypoint before saving.';return;}
  const existing=savedTrips.find(t=>t.id===$('saved-trip').value);
  if(!existing&&savedTrips.length>=30){$('saved-trip-status').textContent='Up to 30 trips can be saved. Delete a trip to make room.';return;}
- const trip={id:existing?.id||(globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`),name,team:selectedTeam(),mission_mode:$('mission-mode').value,stops:ids.map(id=>({text:$(id).value,selected:selectedLocations[id]||null})),area:allowedBounds,blocked_roads:structuredClone(blockedRoads),budget:$('budget').value,strategy:$('strategy').value,places:{enabled:$('include-places').checked,weight:$('place-weight').value,remaining:$('place-remaining').value,excluded:[...excludedPlaceIds],week:placeScoringWeek}};
+ const trip={id:existing?.id||(globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`),name,...currentTrip()};
  persistTrips([...savedTrips.filter(t=>t.id!==trip.id),trip],trip.id,`Saved “${name}” in this browser. Saving again updates this trip.`);
 };
 $('delete-trip').onclick=()=>{
  if(searching)return;
  persistTrips(savedTrips.filter(t=>t.id!==$('saved-trip').value),'','Trip deleted.');$('trip-name').value='';
 };
-$('load-trip').onclick=()=>{
- if(searching)return;
- const trip=savedTrips.find(t=>t.id===$('saved-trip').value);if(!trip)return;
+function applyTrip(trip){
  cancelAreaDrawing();cancelBlockedRoadDrawing();mapPickTarget=null;clearAddressPreview();
  for(const id of ['start',...waypointIds(),'end'])delete selectedLocations[id];
  $('waypoints').replaceChildren();
@@ -1407,6 +1409,12 @@ $('load-trip').onclick=()=>{
  finishRouteAreaChange();updateMarkers();clickCount=2;
  const bounds=areaLayer?.getBounds()||(markers.getLayers().length?L.featureGroup(markers.getLayers()).getBounds():null);
  if(bounds?.isValid())map.fitBounds(bounds,{padding:[30,30],maxZoom:15});
+ updateTeam();
+}
+$('load-trip').onclick=()=>{
+ if(searching)return;
+ const trip=savedTrips.find(t=>t.id===$('saved-trip').value);if(!trip)return;
+ applyTrip(trip);
  $('saved-trip-status').textContent=`Loaded “${trip.name}”. Review weekly place settings and search for fresh routes.`;
 };
 renderSavedTrips();
@@ -1488,7 +1496,30 @@ async function init(){
  await Promise.allSettled([refreshBoard(true),refreshRadioCoverage(),refreshPlayers()]);
  $('status').textContent=boardAvailable?'Choose start and destination to plan a drive.':'Waiting for capture data; automatic checks will continue.';
  setInterval(()=>{refreshBoard();refreshRadioCoverage();refreshPlayers();},30*60*1000);
+ const pending=RouteSearch.pending();
+ if(pending?.cancel_requested)void RouteSearch.cancelPending(pending);
+ else if(pending){applyTrip(pending.context.trip);void planTrip(pending);}
 }
+const mobileSearch=window.matchMedia('(max-width: 800px)');
+let progressHome=null;
+function presentSearchProgress(active){
+ const panel=$('search-progress'),dialog=$('search-dialog');
+ if(active&&planningRoute&&mobileSearch.matches){
+  if(!dialog.open){
+   progressHome=panel.parentElement;
+   $('map').scrollIntoView({block:'start',behavior:'auto'});
+   dialog.append(panel);panel.hidden=false;
+   dialog.showModal();document.body.classList.add('search-modal-open');
+  }
+ }else{
+  if(dialog.open)dialog.close();
+  document.body.classList.remove('search-modal-open');
+  if(progressHome){progressHome.append(panel);progressHome=null;}
+ }
+ panel.hidden=!active;
+}
+mobileSearch.addEventListener('change',()=>presentSearchProgress(searching));
+$('search-dialog').addEventListener('cancel',event=>{event.preventDefault();searchController?.abort();});
 function setSearching(active){
  searching=active;
  if($('clear-displayed-route'))$('clear-displayed-route').disabled=active;
@@ -1510,27 +1541,7 @@ function setSearching(active){
  document.querySelectorAll('.address-options button, #comparison button, #waypoints input, #waypoints button').forEach(button=>button.disabled=active);
  drawBlockedRoads();
  refreshWaypointLabels();
-}
-async function streamedPlan(payload, onProgress, signal){
- const response=await fetch('/api/plan-stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal});
- if(!response.ok){const data=await response.json();throw Error(data.error||'Route request failed.');}
- const reader=response.body.getReader(),decoder=new TextDecoder();
- let buffer='',finalResult=null;
- while(true){
-  const {value,done}=await reader.read();
-  buffer+=decoder.decode(value,{stream:!done});
-  const lines=buffer.split('\n');buffer=lines.pop();
-  for(const line of lines){
-   if(!line.trim())continue;
-   const event=JSON.parse(line);
-   if(event.type==='error')throw Error(event.error);
-   if(event.type==='progress')onProgress(event);
-   if(event.type==='result')finalResult=event;
-  }
-  if(done)break;
- }
- if(!finalResult)throw Error('The connection ended before the search finished. Please retry.');
- return finalResult;
+ presentSearchProgress(active);
 }
 function clearStopErrors(){
  $('route-input-error').hidden=true;$('route-input-error').textContent='';
@@ -1549,40 +1560,44 @@ async function validateTripArea(start,end,waypoints,signal){
  // Finish re-enabling the inputs before returning focus to the invalid stop.
  error.invalidStop=ids[0];throw error;
 }
-$('planner').addEventListener('submit',async e=>{
- e.preventDefault();
+async function planTrip(resuming=null){
  if(searching)return;
- let timer=null,invalidStop=null;
+ let timer=null,invalidStop=null,completed=false;
  clearStopErrors();
  try{
-  searchController=new AbortController();setSearching(true);updateMarkers();
+  planningRoute=true;searchController=new AbortController();setSearching(true);updateMarkers();
   $('search-progress').hidden=false;$('progress-bar').value=0;$('progress-percent').textContent='0%';
   $('progress-stage').textContent='Connecting to planner…';
   $('status').textContent='Search in progress. You can cancel at any time.';
-  const started=Date.now();let lastUpdate=started;
+  const started=resuming?.started_at||Date.now();let lastUpdate=Date.now();
   const updateTime=()=>{
    const seconds=Math.floor((Date.now()-started)/1000),quiet=Math.floor((Date.now()-lastUpdate)/1000);
    $('progress-time').textContent=`Elapsed ${Math.floor(seconds/60)}m ${seconds%60}s · Last update ${quiet}s ago${quiet>=10?' · Waiting for routing provider…':''}`;
   };
   updateTime();timer=setInterval(updateTime,1000);
-  $('progress-stage').textContent='Checking start and destination…';
-  const start=await resolveLocation('start',searchController.signal);
-  const requiredWaypoints=[];
-  for(const id of waypointIds())requiredWaypoints.push(await resolveLocation(id,searchController.signal));
-  const end=await resolveLocation('end',searchController.signal);
-  if(!start || !end || requiredWaypoints.some(point=>!point)){
-   $('status').textContent=`Choose the matching addresses below the inputs, then find ${selectedTeam()} opportunities again.`;
-   $('progress-stage').textContent='Waiting for address selection';return;
+  let start,end,requiredWaypoints;
+  if(!resuming){
+   $('progress-stage').textContent='Checking start and destination…';
+   start=await resolveLocation('start',searchController.signal);
+   requiredWaypoints=[];
+   for(const id of waypointIds())requiredWaypoints.push(await resolveLocation(id,searchController.signal));
+   end=await resolveLocation('end',searchController.signal);
+   if(!start || !end || requiredWaypoints.some(point=>!point)){
+    $('status').textContent=`Choose the matching addresses below the inputs, then find ${selectedTeam()} opportunities again.`;
+    $('progress-stage').textContent='Waiting for address selection';return;
+   }
+   $('progress-stage').textContent='Checking stops against the drawn area…';
+   await validateTripArea(start,end,requiredWaypoints,searchController.signal);
+   updateMarkers();
   }
-  $('progress-stage').textContent='Checking stops against the drawn area…';
-  await validateTripArea(start,end,requiredWaypoints,searchController.signal);
-  updateMarkers();
-  const requestedLabels={start:$('start').value,end:$('end').value,waypoints:waypointIds().map(id=>$(id).value)};
-  const data=await streamedPlan({place_options:{enabled:$('include-places').checked,weight:Number($('place-weight').value),remaining:Number($('place-remaining').value),excluded:[...excludedPlaceIds],week:placeScoringWeek},allowed_bounds:allowedBounds,blocked_roads:blockedRoads,mission_mode:$('mission-mode').value,team:selectedTeam(),start,end,waypoints:requiredWaypoints,detour_minutes:Number($('budget').value),strategy:$('strategy').value},event=>{
+  const requestedLabels=resuming?.context.labels||{start:$('start').value,end:$('end').value,waypoints:waypointIds().map(id=>$(id).value)};
+  const payload=resuming?.payload||{place_options:{enabled:$('include-places').checked,weight:Number($('place-weight').value),remaining:Number($('place-remaining').value),excluded:[...excludedPlaceIds],week:placeScoringWeek},allowed_bounds:allowedBounds,blocked_roads:blockedRoads,mission_mode:$('mission-mode').value,team:selectedTeam(),start,end,waypoints:requiredWaypoints,detour_minutes:Number($('budget').value),strategy:$('strategy').value};
+  const onProgress=event=>{
    lastUpdate=Date.now();$('progress-bar').value=event.percent;
    $('progress-percent').textContent=`${Math.floor(event.percent)}%`;
    $('progress-stage').textContent=event.message;updateTime();
-  },searchController.signal);
+  };
+  const data=await (resuming?RouteSearch.resume(resuming,onProgress,searchController.signal):RouteSearch.start(payload,{labels:requestedLabels,trip:currentTrip()},onProgress,searchController.signal));
   result=data;tripLabels=requestedLabels;renderFeedStatus();
   if(data.places?.week_start){
    placeScoringWeek=data.places.week_start;excludedPlaceIds=new Set(data.places.excluded||[]);
@@ -1591,6 +1606,7 @@ $('planner').addEventListener('submit',async e=>{
   }
   $('progress-bar').value=100;$('progress-percent').textContent='100%';$('progress-stage').textContent='Search complete';
   showComparison();showActiveResult();
+  completed=true;
   $('status').textContent=data.no_opportunities?(data.message||'No opportunities found for this mission within the budget.'):`${data.strategy==='beam'?'Beam':'Greedy'}: ${data.routes.length} route options within budget. ${data.routing_metrics?.workers||1} routing workers; average request ${data.routing_metrics?.mean_request_seconds||0}s (including queue/rate-limit waits). ${data.failed_candidates ? `${data.failed_candidates} detour requests failed. ` : ''}${data.mission_mode==='fortify'?'Amber outlines show reinforcement targets; reinforcement adds no immediate square-held points.':'Green outlines show mission targets; capture is not guaranteed.'}`;
  }catch(error){
   const cancelled=error.name==='AbortError';
@@ -1599,9 +1615,11 @@ $('planner').addEventListener('submit',async e=>{
   $('progress-stage').textContent=cancelled?'Search cancelled':error.boundaryValidation?'Trip constraints need attention':'Search failed';
  }finally{
   if(timer)clearInterval(timer);
-  searchController=null;setSearching(false);
+  searchController=null;setSearching(false);planningRoute=false;
+  if(completed&&mobileSearch.matches)$('map').scrollIntoView({block:'start',behavior:'auto'});
   if(invalidStop){revealSidebarControl($(invalidStop));$(invalidStop)?.focus();}
  }
-});
+}
+$('planner').addEventListener('submit',event=>{event.preventDefault();void planTrip();});
 $('print').onclick=()=>window.print();
 init();

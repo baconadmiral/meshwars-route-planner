@@ -27,6 +27,7 @@ from server import ROOT, ROUTING_WORKERS, SearchCancelled, fetch_routes, parse_p
 from app_version import build_version
 from territory_reports import territory_report
 from pwa import PWA_ASSETS, service_worker
+from search_jobs import SearchJobs, SearchJobError
 from planner import search_routes
 
 
@@ -68,6 +69,7 @@ def create_app(runtime, search_limit=2):
     app = Flask(__name__, static_folder=None)
     app.config['MAX_CONTENT_LENGTH'] = 5*1024*1024
     slots = threading.BoundedSemaphore(search_limit)
+    jobs = SearchJobs(slots=slots, stopping=getattr(runtime, 'stopping', None))
     shares = GPXShares()
 
     @app.before_request
@@ -97,6 +99,8 @@ def create_app(runtime, search_limit=2):
 
     @app.errorhandler(Exception)
     def error_response(error):
+        if isinstance(error, SearchJobError):
+            return jsonify(error=str(error)), error.status, ({'Retry-After': '10'} if error.status == 429 else {})
         if isinstance(error, StopsOutsideArea):
             return jsonify(error=str(error),outside_stops=error.stop_keys),400
         if isinstance(error, ShareCapacityError):
@@ -123,6 +127,7 @@ def create_app(runtime, search_limit=2):
     def reports_data():
         return jsonify(territory_report(runtime.board.snapshot(True)))
 
+    @app.get('/search-client.js')
     @app.get('/app.js')
     @app.get('/style.css')
     @app.get('/reports.js')
@@ -226,7 +231,8 @@ def create_app(runtime, search_limit=2):
 
     @app.post('/api/plan')
     @app.post('/api/plan-stream')
-    def plan():
+    @app.post('/api/searches/<token>')
+    def plan(token=None):
         body=json_object()
         start, end, via, budget, strategy, team, bounds = parse_plan_request(body)
         bonus_options=place_options(body.get('place_options'))
@@ -235,11 +241,6 @@ def create_app(runtime, search_limit=2):
         radio_snapshot = runtime.radio.snapshot()
         if not snapshot['available']:
             return jsonify(error='No board data available yet. Please wait for the feed.'), 503
-        if runtime.stopping.is_set() or not slots.acquire(blocking=False):
-            response = jsonify(error='Search capacity is busy. Please retry shortly.')
-            response.headers['Retry-After'] = '10'
-            return response, 429
-
         def run(progress=None):
             result = search_routes(start, end, snapshot['coverage'], budget, fetch_routes,
                                    progress=progress, strategy=strategy, workers=ROUTING_WORKERS,
@@ -248,6 +249,14 @@ def create_app(runtime, search_limit=2):
             annotate_routes(result, radio_snapshot)
             result['board_revision'] = snapshot.get('revision')
             return result
+
+        if token is not None:
+            return jsonify(jobs.start(token, body, run)), 202
+
+        if runtime.stopping.is_set() or not slots.acquire(blocking=False):
+            response = jsonify(error='Search capacity is busy. Please retry shortly.')
+            response.headers['Retry-After'] = '10'
+            return response, 429
 
         if request.path == '/api/plan':
             try:
@@ -313,6 +322,15 @@ def create_app(runtime, search_limit=2):
         response.headers['X-Accel-Buffering'] = 'no'
         response.call_on_close(cancelled.set)
         return response
+
+    @app.get('/api/searches/<token>')
+    def search_status(token):
+        return jsonify(jobs.get(token))
+
+    @app.post('/api/searches/<token>/cancel')
+    def cancel_search(token):
+        json_object()
+        return jsonify(jobs.cancel(token))
 
     return app
 
