@@ -7,14 +7,14 @@ const path=require('node:path');
 const directory=path.resolve(__dirname,'../../static');
 let revision='a'.repeat(40);
 let networkAvailable=true;
-const files={'/':'index.html','/reports':'reports.html','/style.css':'style.css','/reports.css':'reports.css','/pwa.js':'pwa.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/icons/icon.svg':'icons/icon.svg','/icons/icon-192.png':'icons/icon-192.png','/icons/icon-512.png':'icons/icon-512.png','/icons/apple-touch-icon.png':'icons/apple-touch-icon.png'};
+const files={'/':'index.html','/reports':'reports.html','/style.css':'style.css','/reports.css':'reports.css','/pwa.js':'pwa.js','/startup.js':'startup.js','/search-client.js':'search-client.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/icons/icon.svg':'icons/icon.svg','/icons/icon-192.png':'icons/icon-192.png','/icons/icon-512.png':'icons/icon-512.png','/icons/apple-touch-icon.png':'icons/apple-touch-icon.png'};
 const server=http.createServer((request,response)=>{
  if(!networkAvailable){request.socket.destroy();return;}
  const url=new URL(request.url,'http://localhost');
  response.setHeader('Cache-Control','no-store');
  if(url.pathname.startsWith('/api/')){response.setHeader('Content-Type','application/json');response.end(JSON.stringify({revision}));return;}
  // Omit the map/report apps: this test exercises the real install and SW scripts.
- if(['/app.js','/reports.js'].includes(url.pathname)){response.setHeader('Content-Type','application/javascript');response.end('');return;}
+ if(['/app.js','/reports.js'].includes(url.pathname)){response.setHeader('Content-Type','application/javascript');response.end("window.appStartupState={ready:true};window.dispatchEvent(new Event('app-startup'));");return;}
  const file=files[url.pathname];
  if(!file){response.writeHead(404);response.end();return;}
  response.setHeader('Content-Type',file.endsWith('.webmanifest')?'application/manifest+json':file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':file.endsWith('.png')?'image/png':file.endsWith('.svg')?'image/svg+xml':'text/html');
@@ -27,7 +27,7 @@ const server=http.createServer((request,response)=>{
  const browser=await chromium.launch({headless:true});
  try{
   const context=await browser.newContext({viewport:{width:390,height:844}});
-  await context.route('https://unpkg.com/**',route=>route.abort());
+  await context.route('https://unpkg.com/**',route=>route.fulfill({contentType:route.request().resourceType()==='stylesheet'?'text/css':'application/javascript',body:''}));
   const page=await context.newPage();
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(origin);

@@ -1,5 +1,9 @@
 'use strict';
 const $ = id => document.getElementById(id);
+function startupState(update){
+ window.appStartupState={...(window.appStartupState||{}),...update};
+ window.dispatchEvent(new Event('app-startup'));
+}
 $('open-reports').onclick=()=>{window.location.href='/reports';};
 async function loadAppVersion(){
  const label=$('app-version');
@@ -33,6 +37,9 @@ const routeColors={BLUE:'#ffd43b',RED:'#00d4e8',GREEN:'#ff3ca0',PURPLE:'#ffd43b'
 const routeColor=team=>routeColors[team]||'#ffd43b';
 const selectedTeam=()=>$('team').value;
 let map, territories, routeLayer, markers, targets, radioLayer, bonusPlacesLayer;
+window.addEventListener('app-visible',()=>{
+ if(map){map.invalidateSize({pan:false});window.dispatchEvent(new Event('resize'));}
+});
 let excludedPlaceIds=new Set(),placeScoringWeek=null;
 let radioSnapshot=null,radioStartupChecks=0;
 const meshSquareEvidence=new Map();
@@ -897,7 +904,7 @@ function initPanelResize(){
  let ratio=.6,dragging=false,frame=null;
  try{const saved=Number(localStorage.getItem('blue-map-split'));if(saved>0 && saved<1)ratio=saved;}catch{}
  function bounds(){
-  const available=Math.max(0,workspace.clientHeight-divider.offsetHeight);
+  const available=Math.max(0,workspace.clientHeight-divider.offsetHeight-$('map-filters').offsetHeight);
   const minimum=Math.min(160,available/2);
   return {available,minimum,maximum:Math.max(minimum,available-120)};
  }
@@ -926,7 +933,7 @@ function initPanelResize(){
  });
  divider.addEventListener('pointermove',event=>{
   if(!dragging)return;
-  apply(event.clientY-workspace.getBoundingClientRect().top-divider.offsetHeight/2);
+  apply(event.clientY-workspace.getBoundingClientRect().top-$('map-filters').offsetHeight-divider.offsetHeight/2);
  });
  function finish(){
   if(!dragging)return;
@@ -945,7 +952,7 @@ function initPanelResize(){
  });
  const resize=()=>apply(ratio*bounds().available);
  workspace.addEventListener('routepanelchange',resize);
- if(window.ResizeObserver)new ResizeObserver(resize).observe(workspace);
+ if(window.ResizeObserver){const observer=new ResizeObserver(resize);observer.observe(workspace);observer.observe($('map-filters'));}
  else window.addEventListener('resize',resize);
  window.addEventListener('beforeprint',redrawMap);
  window.addEventListener('afterprint',resize);
@@ -1427,8 +1434,28 @@ $('load-trip').onclick=()=>{
  $('saved-trip-status').textContent=`Loaded “${trip.name}”. Review weekly place settings and search for fresh routes.`;
 };
 renderSavedTrips();
+const captureFilterHome=document.createComment('Capture age filter desktop location');
+$('sidebar-capture').before(captureFilterHome);
+const mobileMapFilter=window.matchMedia('(max-width: 800px)');
+const standaloneMapFilter=window.matchMedia('(display-mode: standalone)');
+function positionCaptureFilter(){
+ const dock=$('map-filters'),filter=$('sidebar-capture');
+ const aboveMap=mobileMapFilter.matches||standaloneMapFilter.matches||navigator.standalone===true;
+ if(aboveMap){dock.append(filter);dock.hidden=false;}
+ else{captureFilterHome.after(filter);dock.hidden=true;}
+ document.querySelector('.workspace').dispatchEvent(new Event('routepanelchange'));
+ if(map)map.invalidateSize({pan:false});
+}
+mobileMapFilter.addEventListener('change',positionCaptureFilter);
+standaloneMapFilter.addEventListener('change',positionCaptureFilter);
+positionCaptureFilter();
 async function init(){
- if(!window.L){$('status').textContent='Map library could not load. Check access to unpkg.com and reload.';$('submit').disabled=true;return;}
+ startupState({stage:'Preparing your map…'});
+ if(!window.L){
+  $('status').textContent='Map library could not load. Check access to unpkg.com and reload.';$('submit').disabled=true;
+  startupState({error:'The map could not load. Check your connection, then reload the app.'});return;
+ }
+ if(!window.RouteSearch){startupState({error:'Some app files could not load. Check your connection and reload.'});return;}
  map=L.map('map',{preferCanvas:true}).setView([40.6,-111.9],10);
  initCurrentLocation();
  const operationsLabel=L.control({position:'bottomleft'});
@@ -1502,9 +1529,17 @@ async function init(){
  });
  ['start','end'].forEach(id=>$(id).addEventListener('change',updateMarkers));
  $('submit').disabled=true;
- await Promise.allSettled([refreshBoard(true),refreshRadioCoverage(),refreshPlayers()]);
+ startupState({stage:'Checking the latest territory data…'});
+ const boardCheck=refreshBoard(true);
+ void Promise.allSettled([refreshRadioCoverage(),refreshPlayers()]);
+ let startupTimer;
+ try{await Promise.race([boardCheck,new Promise(resolve=>{startupTimer=setTimeout(resolve,5000);})]);}
+ finally{clearTimeout(startupTimer);}
  $('status').textContent=boardAvailable?'Choose start and destination to plan a drive.':'Waiting for capture data; automatic checks will continue.';
+ startupState({ready:true,error:null});
  setInterval(()=>{refreshBoard();refreshRadioCoverage();refreshPlayers();},30*60*1000);
+ // A recovered search must not open a modal over an unfinished startup screen.
+ if(document.body.classList.contains('app-starting'))await new Promise(resolve=>window.addEventListener('app-visible',resolve,{once:true}));
  const pending=RouteSearch.pending();
  if(pending?.cancel_requested)void RouteSearch.cancelPending(pending);
  else if(pending){applyTrip(pending.context.trip);void planTrip(pending);}
@@ -1516,7 +1551,7 @@ function presentSearchProgress(active){
  if(active&&planningRoute&&mobileSearch.matches){
   if(!dialog.open){
    progressHome=panel.parentElement;
-   $('map').scrollIntoView({block:'start',behavior:'auto'});
+   document.querySelector('.workspace').scrollIntoView({block:'start',behavior:'auto'});
    dialog.append(panel);panel.hidden=false;
    dialog.showModal();document.body.classList.add('search-modal-open');
   }
@@ -1625,10 +1660,13 @@ async function planTrip(resuming=null){
  }finally{
   if(timer)clearInterval(timer);
   searchController=null;setSearching(false);planningRoute=false;
-  if(completed&&mobileSearch.matches)$('map').scrollIntoView({block:'start',behavior:'auto'});
+  if(completed&&mobileSearch.matches)document.querySelector('.workspace').scrollIntoView({block:'start',behavior:'auto'});
   if(invalidStop){revealSidebarControl($(invalidStop));$(invalidStop)?.focus();}
  }
 }
 $('planner').addEventListener('submit',event=>{event.preventDefault();void planTrip();});
 $('print').onclick=()=>window.print();
-init();
+init().catch(()=>{
+ $('status').textContent='The planner could not start. Please reload the app.';
+ startupState({error:'The planner could not start. Check your connection and reload the app.'});
+});

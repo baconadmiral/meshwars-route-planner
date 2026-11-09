@@ -61,7 +61,7 @@ class HostingTests(unittest.TestCase):
         self.assertEqual(len(response.get_json()['days']), 30)
         self.runtime.board.snapshot.assert_called_once_with(True)
         self.assertFalse(self.runtime.board.request_refresh.called)
-        for path in ('/reports', '/reports.js', '/reports.css'):
+        for path in ('/reports', '/reports.js', '/reports.css', '/startup.js'):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)

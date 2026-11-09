@@ -23,7 +23,7 @@ const fixture={available:true,teams,days,total:435,start_date:'2026-10-01',end_d
      return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
     }
     const name=url.pathname==='/reports'?'reports.html':url.pathname.slice(1);
-    if(['reports.html','reports.js','style.css','reports.css'].includes(name))return route.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(root,'static',name))});
+    if(['reports.html','reports.js','startup.js','style.css','reports.css'].includes(name))return route.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(root,'static',name))});
     return route.abort();
    });
    await page.goto('http://localhost:8000/reports');

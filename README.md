@@ -33,6 +33,12 @@ This is an **online app**. Routing, address lookup, live territory, reports, and
 
 `/sw.js` embeds the production commit SHA, creating a separate offline-notice cache for each deployed build and cleaning up older caches with this app's prefix. Online navigation always uses the network, so refreshing loads the deployed version. Activating an updated worker does not automatically reload an open page or discard a trip in progress. The manifest and worker are served by both Python entry points with caching disabled. Actual installation into iOS/Android home screens still requires a manual device check; browser tests cover manifest/icons, installation prompt handling, worker lifecycle, offline fallback, and reconnection.
 
+## Startup screen
+
+The planner and reports show a branded loading screen as soon as their HTML arrives. Its icon and critical styles are inline, so it stays visible while app styles or the external map library download. Normal stylesheets load without blocking that first paint. Failed map, interface, or bootstrap resources show a reload message, and a slow startup offers a retry after 12 seconds. Reduced-motion preferences disable the spinner animation.
+
+The planner becomes visible once its map, interface styles, and initial board check are ready; the initial board wait is capped at five seconds. Slower board data continues loading in the visible app, with planning disabled until a board is available. Optional roster/radio requests do not delay startup. Reports use the same five-second cap before revealing their loading/error state. The loader does not wait for every map tile and cannot render before the hosting service sends HTML. Existing pending searches reconnect after the interface is visible.
+
 ## Run locally
 
 Requires Python 3.10+ and an internet connection for address lookup, routing, map tiles, and the Leaflet map library. The local development server uses only the standard library. The hosted entry point and full test suite additionally use the pinned packages in `requirements.txt`.
@@ -242,6 +248,8 @@ Each point represents one **currently held square**, attributed to its current o
 `GET /api/reports/territory` aggregates the shared cached board without new upstream requests. The page shows board freshness and excluded timestamp counts, preserves the previous report on refresh failure, and shows unavailable data separately from a valid zero-activity report. Refreshing uses the latest board already held by the server; the normal background feed controls its upstream freshness. Team/player/age filters from the map do not affect the standalone report.
 
 ## Team scores and color filters
+
+On phone-sized screens (up to 800 px) and in the installed PWA, **Captured in last** sits immediately above the map. Desktop browser tabs retain the sidebar position. This is the same control moved between layouts, so its selected age, saved preference, filtered counts, and behavior remain unchanged. Map/route resizing reserves space for the filter, and automatic scrolling brings the filter and map into view together.
 
 The strip below the header shows **total points** and **squares currently held** for each team, ranked by total points. Total points come from MeshWars’ public Meshtastic scoreboard (`https://meshwars.com/scores`) and include territory, check-in, and exploration points. Hover a card for the breakdown. Squares held are current territory, not a count of all historical capture events; the board does not contain per-team lifetime capture counts. Per-square defense scores are not summed into this total.
 

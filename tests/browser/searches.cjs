@@ -44,7 +44,7 @@ const result={team:'BLUE',strategy:'greedy',routes:[fixture.route],baseline:fixt
     return reply(jobs.has(token)?{token,...jobs.get(token)}:{error:'Search expired or the server restarted. Please plan again.'},jobs.has(token)?200:404);
    }
    const name=url.pathname==='/'?'index.html':url.pathname.slice(1);
-   if(['index.html','app.js','search-client.js','style.css'].includes(name))return intercepted.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(root,'static',name))});
+   if(['index.html','app.js','search-client.js','startup.js','style.css'].includes(name))return intercepted.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(root,'static',name))});
    return intercepted.abort();
   });
   await page.goto('http://localhost:8000/');

@@ -128,6 +128,7 @@ def create_app(runtime, search_limit=2):
         return jsonify(territory_report(runtime.board.snapshot(True)))
 
     @app.get('/search-client.js')
+    @app.get('/startup.js')
     @app.get('/app.js')
     @app.get('/style.css')
     @app.get('/reports.js')
