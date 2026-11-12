@@ -469,6 +469,12 @@ function updateCaptureAreaControls(cells){
   $('capture-area-status').textContent='Filters or capture data changed. Run Recon sweep again.';
  }
  $('next-capture-area').disabled=captureAreas.length<2;
+ const button=$('find-capture-areas'),wasDisabled=button.disabled;
+ button.disabled=cells.length===0;
+ const emptyMessage=capturedSquaresHidden?'Show captured squares first to run Recon sweep.':!boardAvailable?'Capture data is not available yet.':'No matching territory squares. Change the date, team, or player filter to run Recon sweep.';
+ button.title=button.disabled?emptyMessage:'Find concentrations of squares matching the map filters';
+ if(button.disabled)$('capture-area-status').textContent=emptyMessage;
+ else if(wasDisabled&&captureAreaIndex<0)$('capture-area-status').textContent='Matching territory found. Run Recon sweep to locate capture areas.';
 }
 function fitCaptureBounds(bounds){
  // Mobile filters live above the map; bring the map into view after choosing an area.

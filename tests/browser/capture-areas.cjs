@@ -61,11 +61,22 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
    await page.evaluate(()=>{mapPlayerFilter='Nobody';drawBoard();});
    assert.equal(await page.locator('#next-capture-area').isEnabled(),false);
    await page.evaluate(()=>{window.emptyFitCalls=0;const fit=map.fitBounds;map.fitBounds=function(...args){window.emptyFitCalls++;return fit.apply(this,args);};});
-   await page.locator('#find-capture-areas').click();
-   assert.match(await page.locator('#capture-area-status').innerText(),/No squares match/);
+   assert.equal(await page.locator('#find-capture-areas').isDisabled(),true);
+   assert.match(await page.locator('#capture-area-status').innerText(),/No matching territory squares/);
    assert.equal(await page.evaluate(()=>window.emptyFitCalls),0,'Empty results must not request a map fit');
    await page.evaluate(()=>{mapPlayerFilter='';capturedSquaresHidden=true;drawBoard();});
-   await page.locator('#find-capture-areas').click();assert.match(await page.locator('#capture-area-status').innerText(),/Show captured squares first/);
+   assert.equal(await page.locator('#find-capture-areas').isDisabled(),true);
+   assert.match(await page.locator('#capture-area-status').innerText(),/Show captured squares first/);
+   await page.evaluate(()=>{capturedSquaresHidden=false;captureDays=5;$('capture-days').value='5';mapPlayerFilter='';updateSquareDarkness(true);setTeamMapFilter('GREEN');});
+   assert.match(await page.locator('#filtered-score-GREEN').innerText(),/^0 territory pts/);
+   assert.equal(await page.locator('#find-capture-areas').isDisabled(),true,'Zero filtered territory must disable Recon sweep');
+   await page.evaluate(()=>setTeamMapFilter('PURPLE'));
+   assert.equal(await page.locator('#find-capture-areas').isEnabled(),true,'Matching captures must re-enable Recon sweep');
+   await page.locator('#find-capture-areas').click();
+   assert.match(await page.locator('#capture-area-status').innerText(),/4 matching PURPLE squares/);
+   await page.evaluate(()=>setTeamMapFilter('GREEN'));
+   await page.locator('#find-capture-areas').scrollIntoViewIfNeeded();
+   await page.screenshot({path:path.join(__dirname,`test-results/empty-recon-${width}.png`)});
    await page.evaluate(()=>{
     const c=(id,lon,lat)=>({cell_id:id,west:lon,east:lon+.001,south:lat,north:lat+.001,captured_at:1});
     const groups=rankCaptureAreas([c('a',179.99,0),c('b',-179.99,0),c('other',0,50)]);
