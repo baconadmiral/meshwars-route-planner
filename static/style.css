@@ -231,3 +231,5 @@ body.search-modal-open{overflow:hidden}
 }
 
 .quick-capture-filter #capture-calendar-note{font-size:10px;line-height:1.4;margin:4px 0;color:var(--muted)}
+
+#find-capture-areas:disabled{cursor:not-allowed}
