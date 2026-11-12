@@ -229,3 +229,5 @@ body.search-modal-open{overflow:hidden}
  .map-first-layout #map-divider{flex-basis:36px}
  #mission-planner:focus,#recon-workspace:focus{outline:none}
 }
+
+.quick-capture-filter #capture-calendar-note{font-size:10px;line-height:1.4;margin:4px 0;color:var(--muted)}

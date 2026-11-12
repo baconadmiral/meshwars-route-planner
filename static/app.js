@@ -323,15 +323,25 @@ try{
 }catch{}
 try{
  const saved=localStorage.getItem('blue-capture-days');
- if(saved!==null && saved.trim()!=='' && Number.isInteger(Number(saved)) && Number(saved)>=0 && Number(saved)<=60)captureDays=Number(saved);
+ if(saved!==null && saved.trim()!=='' && Number.isInteger(Number(saved)) && Number(saved)>=0 && Number(saved)<=60)captureDays=Math.min(30,Number(saved));
 }catch{}
+function captureFilterLabel(){
+ return captureDays===0?'All time':captureDays===1?'Today':captureDays===2?'Yesterday + today':`Last ${captureDays} days`;
+}
+function captureWindowStart(now=Date.now()/1000){
+ // Local date arithmetic preserves midnight across 23/25-hour DST days.
+ const start=new Date(now*1000);start.setHours(0,0,0,0);
+ start.setDate(start.getDate()-Math.max(0,captureDays-1));
+ return start.getTime()/1000;
+}
 let squareStyleFrame=null;
 function updateSquareDarkness(immediate=false){
  $('square-darkness-value').value=`${Math.round(squareDarkness)}%`;
  $('square-contrast-value').value=`${Math.round(squareContrast)}%`;
- const captureLabel=captureDays===0?'All time':`${captureDays} ${captureDays===1?'day':'days'}`;
+ const captureLabel=captureFilterLabel();
  $('capture-days-value').value=captureLabel;
- $('capture-days').setAttribute('aria-valuetext',captureDays===0?'Show all captures':`Captured in the last ${captureLabel}`);
+ $('capture-calendar-note').textContent=`Calendar days · ${Intl.DateTimeFormat().resolvedOptions().timeZone||'device local time'}`;
+ $('capture-days').setAttribute('aria-valuetext',captureDays===0?'Show all captures':`${captureLabel}, by local calendar date`);
  // Update the legend with the same score shading as the actual squares.
  document.querySelectorAll('.score-swatches i').forEach((swatch,index)=>{
   const points=[.1,1,3][index];
@@ -376,6 +386,18 @@ $('capture-days').addEventListener('change',()=>{
 });
 updateSquareDarkness();
 window.addEventListener('squarethemechange',()=>updateSquareDarkness(true));
+let captureMidnightTimer=null;
+function refreshCaptureCalendar(){
+ if(captureMidnightTimer!==null)clearTimeout(captureMidnightTimer);
+ updateSquareDarkness(true);
+ const next=new Date();next.setHours(24,0,0,0);
+ captureMidnightTimer=setTimeout(refreshCaptureCalendar,Math.max(1000,next.getTime()-Date.now()+50));
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshCaptureCalendar();});
+window.addEventListener('focus',refreshCaptureCalendar);
+// Defer the first refresh until all map/filter state has been initialized.
+setTimeout(refreshCaptureCalendar,0);
+
 function squareStyle(cell){
  const points=holdingScore(cell);
  // Visual saturation at 3 points; full scores still drive route ranking.
@@ -404,7 +426,7 @@ function captureAgeVisible(cell,now=Date.now()/1000){
  if(captureDays===0)return true;
  const captured=cell?.captured_at;
  return typeof captured==='number' && Number.isFinite(captured) && captured>0 &&
-        captured<=now && captured>=now-captureDays*86400;
+        captured<=now && captured>=captureWindowStart(now);
 }
 // Spatial buckets bound comparisons while retaining proximity across date lines/poles.
 function rankCaptureAreas(cells){
@@ -561,7 +583,7 @@ function squareViewportCells(){
  const bounds=map.getBounds(),now=Date.now()/1000;
  // Unknown player matches must be checked before the player filter can hide them.
  return board.filter(cell=>(!mapTeamFilter||cell.owner_team===mapTeamFilter)
-  &&(captureDays===0||(typeof cell.captured_at==='number'&&cell.captured_at<=now&&cell.captured_at>=now-captureDays*86400))
+  &&captureAgeVisible(cell,now)
   &&bounds.intersects([[cell.south,cell.west],[cell.north,cell.east]]));
 }
 function squareLookupCandidates(){
@@ -1102,8 +1124,8 @@ function updateFilteredTeamScores(){
   const label=$(`filtered-score-${team}`);
   if(!label)continue;
   label.hidden=captureDays===0;
-  label.textContent=boardAvailable?`${counts[team].toLocaleString()} territory pts · last ${captureDays} ${captureDays===1?'day':'days'}`:'Filtered territory score unavailable';
-  label.title='One territory point per currently held square matching the capture-age filter, across the full board. Excludes check-in and exploration bonuses. Missing or future capture times are excluded. Team, player, map viewport and hide-square filters do not affect this count.';
+  label.textContent=boardAvailable?`${counts[team].toLocaleString()} territory pts · ${captureFilterLabel().toLowerCase()}`:'Filtered territory score unavailable';
+  label.title='One territory point per currently held square matching the local calendar-date filter, across the full board. Excludes check-in and exploration bonuses. Missing or future capture times are excluded. Team, player, map viewport and hide-square filters do not affect this count.';
  }
 }
 function renderTeamScores(){
