@@ -251,7 +251,7 @@ Each point represents one **currently held square**, attributed to its current o
 
 ## Team scores and color filters
 
-On phone-sized screens (up to 800 px) and in the installed PWA, **Captured in last** sits immediately above the map. Desktop browser tabs retain the sidebar position. This is the same control moved between layouts, so its selected age, saved preference, filtered counts, and behavior remain unchanged. Map/route resizing reserves space for the filter, and automatic scrolling brings the filter and map into view together.
+On phone-sized screens (up to 800 px) and in the installed PWA, **Captured** sits immediately above the map. Desktop browser tabs retain the sidebar position. This is the same control moved between layouts, so its selected age, saved preference, filtered counts, and behavior remain unchanged. Map/route resizing reserves space for the filter, and automatic scrolling brings the filter and map into view together.
 
 The strip below the header shows **total points** and **squares currently held** for each team, ranked by total points. Total points come from MeshWars’ public Meshtastic scoreboard (`https://meshwars.com/scores`) and include territory, check-in, and exploration points. Hover a card for the breakdown. Squares held are current territory, not a count of all historical capture events; the board does not contain per-team lifetime capture counts. Per-square defense scores are not summed into this total.
 
@@ -309,7 +309,7 @@ The weights affect initial enemy candidates, exploration clusters, local inserti
 
 The palette uses muted team hues without pale white-heavy fills in dark mode. Filled squares have no grid stroke; hover reveals a temporary team outline. At 0% overall fill, faint team outlines remain. Both sliders redraw immediately and on release; theme changes repaint the fills too. The legend follows the same settings.
 
-**Captured in last** filters the map across all teams: 0 (the default) shows every square, and 1–60 shows captures in the last N rolling 24-hour days using `captured_at`, relative to the current device time. Both endpoints of the time window are included. Missing, invalid, and future capture timestamps are hidden while a window is active. The setting persists in the browser; a count shows how many snapshot squares match. Selected-route target overlays follow the same filter, while the route line and route statistics remain unchanged. This is a display filter: routing still uses the full snapshot. Moving either direction redraws immediately without recentering the map.
+**Captured** filters the map across all teams: 0 (the default) shows every square, and 1 selects **Today** (local midnight through now), 2 selects **Yesterday + today** (yesterday’s local midnight through now), and 3–30 select **Last N days**, including today and the previous N−1 calendar dates. The device timezone is shown beside the slider. Date arithmetic handles daylight-saving transitions rather than subtracting N × 24 hours. Open pages refresh at local midnight and when returning to the app. Existing saved slider values above 30 are capped at 30. Both endpoints of the time window are included. Missing, invalid, and future capture timestamps are hidden while a window is active. The setting persists in the browser; a count shows how many snapshot squares match. Selected-route target overlays follow the same filter, while the route line and route statistics remain unchanged. This is a display filter: routing still uses the full snapshot. Moving either direction redraws immediately without recentering the map.
 
 Score strength is not an exact capture-age measure: the tooltip includes `captured_at` from the snapshot where available.
 
@@ -430,7 +430,7 @@ A square being refreshed displays a cyan animated outline with a dark halo and a
 
 The sidebar prioritizes team selection, loading saved trips, and creating a route. Start, destination, extra-time budget and Search remain visible. Waypoints, route area, place bonuses and search strategy expand individually. Saving/managing trips is expandable under the always-visible saved-trip loader. Map display/filter controls, drive tracking, data/coverage and guidance are collapsed secondary sections. Plan/Saved/Map/Drive/Data shortcuts open and scroll to their sections. Loading waypoint trips reveals their stops; validation reveals hidden invalid controls. An active drive reopens its tracking section after reload. These layout changes do not reset settings or alter scoring.
 
-The frequently used **Captured in last** slider stays visible directly below team selection, separate from the expandable map display controls. It remains a display filter; route scoring still uses the full board.
+The frequently used **Captured** slider stays visible directly below team selection, separate from the expandable map display controls. It remains a display filter; route scoring still uses the full board.
 
 ### Standard routes and wild loops
 
@@ -473,9 +473,9 @@ A MeshWars integration token does not authorize the separate direct FreqMapper p
 
 Counts are square-level historical evidence with unspecified observation ages/history window. Passive reception does not establish transmit coverage; missing/zero evidence remains unknown rather than failed. These summaries do not feed the route's 50-meter point-proximity coverage annotation or change route priority, because exact observation locations are unavailable.
 
-When **Captured in last** is set to 1–60 days, each top team card also shows filtered territory points: one point per currently held square with a valid capture timestamp in that window. These counts cover the full board for every team, independently of team/player selection, map position, and hiding squares. Missing and future timestamps are excluded. Official totals remain visible; check-in and exploration bonuses cannot be filtered by capture age. Select All time to hide the extra counts.
+When **Captured** is set to a calendar range of 1–30 days, each top team card also shows filtered territory points: one point per currently held square with a valid capture timestamp in that window. These counts cover the full board for every team, independently of team/player selection, map position, and hiding squares. Missing and future timestamps are excluded. Official totals remain visible; check-in and exploration bonuses cannot be filtered by capture age. Select All time to hide the extra counts.
 
-On mobile and installed PWA layouts, **Captured in last** uses a 48-pixel-high slider with a 32-pixel thumb and thicker track. The control is inset from both screen edges to reduce accidental Android back gestures; vertical page scrolling remains available.
+On mobile and installed PWA layouts, **Captured** uses a 48-pixel-high slider with a 32-pixel thumb and thicker track. The control is inset from both screen edges to reduce accidental Android back gestures; vertical page scrolling remains available.
 
 ### Find capture concentrations
 

@@ -102,7 +102,7 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC0lEQVR42mP8/x8AAw
     await page.screenshot({path:path.join(__dirname,`test-results/recon-layout-${scenario}.png`)});
 
     await page.locator('#capture-days').evaluate(input=>{input.value='7';input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));});
-    await page.waitForFunction(()=>document.getElementById('capture-days-value').value==='7 days');
+    await page.waitForFunction(()=>document.getElementById('capture-days-value').value==='Last 7 days');
     if(scenario==='held-assets'){
      await page.setViewportSize({width:1280,height:1000});
      await page.waitForFunction(()=>document.querySelector('aside #capture-days')!==null);
