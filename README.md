@@ -476,3 +476,9 @@ Counts are square-level historical evidence with unspecified observation ages/hi
 When **Captured in last** is set to 1–60 days, each top team card also shows filtered territory points: one point per currently held square with a valid capture timestamp in that window. These counts cover the full board for every team, independently of team/player selection, map position, and hiding squares. Missing and future timestamps are excluded. Official totals remain visible; check-in and exploration bonuses cannot be filtered by capture age. Select All time to hide the extra counts.
 
 On mobile and installed PWA layouts, **Captured in last** uses a 48-pixel-high slider with a 32-pixel thumb and thicker track. The control is inset from both screen edges to reduce accidental Android back gestures; vertical page scrolling remains available.
+
+### Find capture concentrations
+
+Choose a team score card and a capture-age range, then use **Find capture areas** beside the date slider. It searches the full loaded board, respects team/player/date and hidden-square filters, groups square centers connected within 3 km, and zooms to the group with the most matching squares (newest capture breaks ties). **Next area** cycles groups; **All matches** fits every matching square. These proximity groups can follow long connected corridors and do not identify individual drives. Filter or relevant board changes reset the selection. No extra cell-detail API calls are made, and planning settings stay unchanged.
+
+The board records current ownership and capture timestamps, not complete visit history. Explorer bonuses can come from revisiting already-owned places, so a recent Explorer-score increase may have no corresponding recent-capture cluster. Missing and future capture times remain excluded when an age filter is active.

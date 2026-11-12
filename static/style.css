@@ -213,3 +213,5 @@ body.search-modal-open{overflow:hidden}
 .map-filter-dock #capture-days::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:32px;height:32px;margin-top:-11px;border:3px solid var(--surface);border-radius:50%;background:var(--accent);box-shadow:0 1px 4px #0005}
 .map-filter-dock #capture-days::-moz-range-thumb{width:26px;height:26px;border:3px solid var(--surface);border-radius:50%;background:var(--accent);box-shadow:0 1px 4px #0005}
 .map-filter-dock #capture-days:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:8px}
+
+.capture-area-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.capture-area-actions button{min-height:44px;padding:8px 10px;font-size:11px}.capture-area-help{margin-top:6px;color:var(--muted);font-size:11px}.capture-area-help summary{cursor:pointer;min-height:32px;display:list-item;align-content:center}.capture-area-help p{line-height:1.5}.quick-capture-filter #capture-area-status{font-size:11px;line-height:1.5;margin:8px 0 0}
