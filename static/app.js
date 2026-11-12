@@ -406,18 +406,92 @@ function captureAgeVisible(cell,now=Date.now()/1000){
  return typeof captured==='number' && Number.isFinite(captured) && captured>0 &&
         captured<=now && captured>=now-captureDays*86400;
 }
+// Spatial buckets bound comparisons while retaining proximity across date lines/poles.
+function rankCaptureAreas(cells){
+ const radius=3000,earth=6371000,buckets=new Map(),points=[],parents=[];
+ function root(i){while(parents[i]!==i){parents[i]=parents[parents[i]];i=parents[i];}return i;}
+ for(const cell of cells){
+  if(![cell.south,cell.north,cell.west,cell.east].every(Number.isFinite)||cell.south>cell.north||cell.west>cell.east)continue;
+  const lat=(cell.south+cell.north)/2*Math.PI/180,lon=(cell.west+cell.east)/2*Math.PI/180;
+  if(Math.abs(lat)>Math.PI/2||Math.abs(lon)>Math.PI)continue;
+  const xyz=[earth*Math.cos(lat)*Math.cos(lon),earth*Math.cos(lat)*Math.sin(lon),earth*Math.sin(lat)];
+  const bin=xyz.map(v=>Math.floor(v/radius)),i=points.length;
+  points.push({cell,xyz});parents.push(i);
+  for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){
+   for(const j of buckets.get(`${bin[0]+dx},${bin[1]+dy},${bin[2]+dz}`)||[]){
+    const other=points[j].xyz;
+    if(xyz.reduce((sum,v,k)=>sum+(v-other[k])**2,0)<=radius**2){const a=root(i),b=root(j);if(a!==b)parents[a]=b;}
+   }
+  }
+  const key=bin.join(',');if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(i);
+ }
+ const groups=new Map();
+ points.forEach(({cell},i)=>{const key=root(i);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(cell);});
+ return [...groups.values()].map(group=>{
+  const origin=(group[0].west+group[0].east)/2;
+  let south=90,north=-90,west=Infinity,east=-Infinity,newest=0;
+  for(const cell of group){
+   const center=(cell.west+cell.east)/2,shift=Math.round((origin-center)/360)*360;
+   south=Math.min(south,cell.south);north=Math.max(north,cell.north);west=Math.min(west,cell.west+shift);east=Math.max(east,cell.east+shift);
+   if(Number.isFinite(cell.captured_at)&&cell.captured_at<=Date.now()/1000)newest=Math.max(newest,cell.captured_at);
+  }
+  return {count:group.length,newest,bounds:[[south,west],[north,east]],key:group.map(c=>String(c.cell_id)).sort()[0]};
+ }).sort((a,b)=>b.count-a.count||b.newest-a.newest||a.key.localeCompare(b.key));
+}
+let captureAreas=[],captureAreaIndex=-1,captureAreaFingerprint=null;
+function captureAreaCells(){const now=Date.now()/1000;return board.filter(c=>captureVisible(c,now));}
+function captureAreaKey(cells){return `${mapTeamFilter}|${mapPlayerFilter}|${captureDays}|${capturedSquaresHidden}|`+cells.map(c=>`${squareVersion(c)}:${c.west},${c.south},${c.east},${c.north}`).join(';');}
+function updateCaptureAreaControls(cells){
+ if(captureAreaFingerprint!==null&&captureAreaFingerprint!==captureAreaKey(cells)){
+  captureAreas=[];captureAreaIndex=-1;captureAreaFingerprint=null;
+  $('capture-area-status').textContent='Filters or capture data changed. Find capture areas again.';
+ }
+ $('next-capture-area').disabled=captureAreas.length<2;
+}
+function fitCaptureBounds(bounds){
+ // Mobile filters live above the map; bring the map into view after choosing an area.
+ ($('map-filters').hidden?$('map'):$('map-filters')).scrollIntoView({block:'start',behavior:'auto'});map.invalidateSize({pan:false});
+ map.fitBounds(bounds,{padding:[32,32],maxZoom:14,animate:false});
+}
+function showCaptureArea(){
+ const area=captureAreas[captureAreaIndex];if(!area)return;
+ const newest=area.newest?` · newest ${new Date(area.newest*1000).toLocaleDateString()}`:'';
+ $('capture-area-status').textContent=`Area ${captureAreaIndex+1} of ${captureAreas.length} · ${area.count.toLocaleString()} matching ${mapTeamFilter||'all-team'} ${area.count===1?'square':'squares'}${newest}. Capture areas, not Explorer visit history.`;
+ fitCaptureBounds(area.bounds);
+}
+$('find-capture-areas').onclick=()=>{
+ if(!map)return;
+ const cells=captureAreaCells();captureAreas=rankCaptureAreas(cells);captureAreaFingerprint=captureAreaKey(cells);captureAreaIndex=captureAreas.length?0:-1;
+ updateCaptureAreaControls(cells);
+ if(captureAreas.length)showCaptureArea();
+ else $('capture-area-status').textContent=capturedSquaresHidden?'Show captured squares first to find capture areas.':'No squares match these filters. Widen the date range or change the team/player filter.';
+};
+$('next-capture-area').onclick=()=>{
+ const cells=captureAreaCells();updateCaptureAreaControls(cells);
+ if(!captureAreas.length)return;
+ captureAreaIndex=(captureAreaIndex+1)%captureAreas.length;showCaptureArea();
+};
+$('all-capture-matches').onclick=()=>{
+ if(!map)return;
+ const cells=captureAreaCells();updateCaptureAreaControls(cells);
+ if(!cells.length){$('capture-area-status').textContent=capturedSquaresHidden?'Show captured squares first to find capture areas.':'No squares match these filters.';return;}
+ const bounds=L.latLngBounds(cells.flatMap(c=>[[c.south,c.west],[c.north,c.east]]));
+ $('capture-area-status').textContent=`Showing all ${cells.length.toLocaleString()} matching squares across the loaded board. Capture times do not show all Explorer visits.`;
+ fitCaptureBounds(bounds);
+};
 function drawBoard(){
  updateFilteredTeamScores();
  if(!map)return;
  territories.clearLayers();
  if(!board.length){
   if(targets)targets.clearLayers();
-  $('capture-filter-status').textContent='0 squares match.';return;
+  $('capture-filter-status').textContent='0 squares match.';updateCaptureAreaControls([]);return;
  }
  scheduleSquareLookups();
  const bounds=map.getBounds();
  const now=Date.now()/1000;
  const eligible=board.filter(c=>captureVisible(c,now));
+ updateCaptureAreaControls(eligible);
  $('capture-filter-status').textContent=`${capturedSquaresHidden?'Captured squares hidden. ':''}${eligible.length.toLocaleString()} of ${board.length.toLocaleString()} squares match the display filters for ${mapTeamFilter||'all teams'}${mapPlayerFilter?' · '+(mapPlayerFilter==='__unknown__'?'unknown capturer':mapPlayerFilter):''}.${captureDays>0?' Missing or future capture times are hidden.':''}`;
  const visible=eligible.filter(c=>bounds.intersects([[c.south,c.west],[c.north,c.east]]));
  if(targets && result?.routes?.[routeIndex])drawRouteTargets(result.routes[routeIndex]);
