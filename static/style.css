@@ -215,3 +215,17 @@ body.search-modal-open{overflow:hidden}
 .map-filter-dock #capture-days:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:8px}
 
 .capture-area-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.capture-area-actions button{min-height:44px;padding:8px 10px;font-size:11px}.capture-area-help{margin-top:6px;color:var(--muted);font-size:11px}.capture-area-help summary{cursor:pointer;min-height:32px;display:list-item;align-content:center}.capture-area-help p{line-height:1.5}.quick-capture-filter #capture-area-status{font-size:11px;line-height:1.5;margin:8px 0 0}
+
+.mobile-recon-heading,.mobile-recon-return{display:none}
+@media screen{
+ .map-first-layout body{height:auto;min-height:100dvh}
+ .map-first-layout main{flex:none;grid-template-columns:1fr;overflow:visible}
+ .map-first-layout aside{overflow:visible;border-right:0;border-top:1px solid var(--border)}
+ .map-first-layout .workspace{height:max(560px,calc(100dvh - 180px));min-height:560px}
+ .map-first-layout .mobile-recon-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+ .mobile-recon-heading h2{margin:0;font:700 13px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:1px;text-transform:uppercase;color:var(--tactical,var(--accent))}
+ .mobile-recon-heading button,.map-first-layout .mobile-recon-return{min-height:44px;padding:8px 10px;font-size:12px}
+ .map-first-layout .mobile-recon-return{display:block;width:100%;margin-bottom:12px}
+ .map-first-layout #map-divider{flex-basis:36px}
+ #mission-planner:focus,#recon-workspace:focus{outline:none}
+}

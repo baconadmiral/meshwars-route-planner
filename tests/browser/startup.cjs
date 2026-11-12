@@ -85,15 +85,34 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC0lEQVR42mP8/x8AAw
     assert.equal(await page.locator('#capture-days').count(),1);
     const alignment=await page.evaluate(()=>({filter:document.getElementById('map-filters').getBoundingClientRect().bottom,map:document.getElementById('map').getBoundingClientRect().top}));
     assert.ok(Math.abs(alignment.filter-alignment.map)<2,'Map filter must sit directly above the map');
+    const reconOrder=await page.evaluate(()=>{
+     const workspace=document.getElementById('recon-workspace'),planner=document.getElementById('mission-planner');
+     return {first:document.querySelector('main').firstElementChild===workspace,mapTop:document.getElementById('map').getBoundingClientRect().top,workspaceBottom:workspace.getBoundingClientRect().bottom,plannerTop:planner.getBoundingClientRect().top};
+    });
+    assert.equal(reconOrder.first,true,'Mobile/PWA must put the map first in DOM and keyboard order');
+    assert.ok(reconOrder.plannerTop>=reconOrder.workspaceBottom-1,'Planning must follow the recon workspace');
+    assert.ok(reconOrder.mapTop<900-100,'The map must be visible on the initial screen');
+    assert.equal(await page.locator('#find-capture-areas').innerText(),'Recon sweep');
+    await page.locator('.mobile-recon-heading button').click();
+    assert.equal(await page.locator('#mission-planner').evaluate(el=>el===document.activeElement),true);
+    await page.locator('.mobile-recon-return').click();
+    assert.equal(await page.locator('#recon-workspace').evaluate(el=>el===document.activeElement),true);
+    await page.evaluate(()=>window.scrollTo(0,0));
+    fs.mkdirSync(path.join(__dirname,'test-results'),{recursive:true});
+    await page.screenshot({path:path.join(__dirname,`test-results/recon-layout-${scenario}.png`)});
+
     await page.locator('#capture-days').evaluate(input=>{input.value='7';input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));});
     await page.waitForFunction(()=>document.getElementById('capture-days-value').value==='7 days');
     if(scenario==='held-assets'){
      await page.setViewportSize({width:1280,height:1000});
      await page.waitForFunction(()=>document.querySelector('aside #capture-days')!==null);
      assert.equal(await page.locator('#capture-days').inputValue(),'7');
+     assert.equal(await page.evaluate(()=>document.querySelector('main').firstElementChild.id),'mission-planner');
+     assert.equal(await page.locator('.mobile-recon-return').isVisible(),false);
      await page.setViewportSize({width:390,height:844});
      await page.waitForFunction(()=>document.querySelector('#map-filters #capture-days')!==null);
      assert.equal(await page.locator('#capture-days').inputValue(),'7');
+     assert.equal(await page.evaluate(()=>document.querySelector('main').firstElementChild.id),'recon-workspace');
     }
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
    }
