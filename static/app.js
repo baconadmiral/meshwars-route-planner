@@ -444,7 +444,7 @@ function captureAreaKey(cells){return `${mapTeamFilter}|${mapPlayerFilter}|${cap
 function updateCaptureAreaControls(cells){
  if(captureAreaFingerprint!==null&&captureAreaFingerprint!==captureAreaKey(cells)){
   captureAreas=[];captureAreaIndex=-1;captureAreaFingerprint=null;
-  $('capture-area-status').textContent='Filters or capture data changed. Find capture areas again.';
+  $('capture-area-status').textContent='Filters or capture data changed. Run Recon sweep again.';
  }
  $('next-capture-area').disabled=captureAreas.length<2;
 }
@@ -1634,6 +1634,12 @@ async function receiveSharedMission(){
 renderSavedTrips();
 receiveSharedMission();
 window.addEventListener('hashchange',receiveSharedMission);
+const reconWorkspace=document.querySelector('.workspace');
+const reconWorkspaceHome=document.createComment('Desktop map workspace location');
+reconWorkspace.before(reconWorkspaceHome);
+document.querySelectorAll('[data-mobile-target]').forEach(button=>button.onclick=()=>{
+ const target=$(button.dataset.mobileTarget);target.focus({preventScroll:true});target.scrollIntoView({block:'start',behavior:'auto'});
+});
 const captureFilterHome=document.createComment('Capture age filter desktop location');
 $('sidebar-capture').before(captureFilterHome);
 const mobileMapFilter=window.matchMedia('(max-width: 800px)');
@@ -1643,8 +1649,9 @@ function positionCaptureFilter(){
  const installed=standaloneMapFilter.matches||navigator.standalone===true;
  document.documentElement.classList.toggle('standalone-app',installed);
  const aboveMap=mobileMapFilter.matches||installed;
- if(aboveMap){dock.append(filter);dock.hidden=false;}
- else{captureFilterHome.after(filter);dock.hidden=true;}
+ document.documentElement.classList.toggle('map-first-layout',aboveMap);
+ if(aboveMap){document.querySelector('main').prepend(reconWorkspace);dock.append(filter);dock.hidden=false;}
+ else{reconWorkspaceHome.after(reconWorkspace);captureFilterHome.after(filter);dock.hidden=true;}
  document.querySelector('.workspace').dispatchEvent(new Event('routepanelchange'));
  if(map)map.invalidateSize({pan:false});
 }
