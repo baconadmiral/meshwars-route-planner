@@ -19,7 +19,7 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
      const active=navigator.userActivation.isActive;
      if(mode==='cancel')throw new DOMException('Cancelled','AbortError');
      if(mode==='fail')throw new DOMException('Sharing failed','DataError');
-     window.fileShares.push({active,title:data.title,name:data.files[0].name,type:data.files[0].type,text:await data.files[0].text()});
+     window.fileShares.push({active,keys:Object.keys(data).sort(),name:data.files[0].name,type:data.files[0].type,text:await data.files[0].text()});
     }});
    },mode);
    const errors=[];page.on('pageerror',error=>errors.push(error.message));let exportRequests=0,downloads=0;
@@ -82,6 +82,7 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
      await page.waitForFunction(()=>fileShares.length===1);
      const shared=await page.evaluate(()=>fileShares[0]);
      assert.equal(shared.active,true,'The native share must run in the tap, without awaiting a fetch');
+     assert.deepEqual(shared.keys,['files'],'GPX import must share only the file, without title/text/URL items');
      assert.equal((shared.text.match(/<trkpt /g)||[]).length,fixture.route.geometry.coordinates.length);
      assert.ok(shared.name.endsWith('.gpx'));assert.equal(downloads,0);
      if(mode==='xml')assert.equal(shared.type,'application/xml');
@@ -95,12 +96,14 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
     assert.equal(downloads,0);
     fs.mkdirSync(path.join(__dirname,'test-results'),{recursive:true});
     await page.screenshot({path:path.join(__dirname,'test-results/mobile-osmand-handoff.png')});
+    await page.locator('#handoff-show-qr').click();await page.locator('#gpx-share').click();await page.waitForFunction(()=>fileShares.length===3);
+    assert.equal(await page.evaluate(()=>fileShares.every(s=>s.keys.length===1&&s.keys[0]==='files')),true,'All GPX actions must use file-only payloads');
    }
    await page.locator('#navigation-close').click();
    if(mode==='native'){
     await page.evaluate(()=>{const other=structuredClone(result.routes[0]);other.geometry.coordinates[0][0]+=.00001;result.routes.push(other);showRoute(1);});
-    await page.locator('#osmand-send:not([disabled])').waitFor();await page.locator('#osmand-send').click();await page.waitForFunction(()=>fileShares.length===3);
-    const texts=await page.evaluate(()=>fileShares.map(s=>s.text));assert.notEqual(texts[0],texts[2],'Sharing another route must not reuse the previous GPX');
+    await page.locator('#osmand-send:not([disabled])').waitFor();await page.locator('#osmand-send').click();await page.waitForFunction(()=>fileShares.length===4);
+    const texts=await page.evaluate(()=>fileShares.map(s=>s.text));assert.notEqual(texts[0],texts[3],'Sharing another route must not reuse the previous GPX');
     assert.equal(exportRequests,2);
    }
    assert.deepEqual(errors,[]);await page.close();console.log(`Passed OsmAnd ${mode}: direct file handoff/fallback, activation, full GPX, cache and expanded mobile results.`);
