@@ -250,6 +250,16 @@ class HostingTests(unittest.TestCase):
         self.payload['place_options']={'remaining':101}
         self.assertEqual(self.client.post('/api/plan',json=self.payload).status_code,400)
 
+    def test_all_mission_comparison_is_accepted_by_hosted_api(self):
+        with patch('hosting.fetch_routes',side_effect=lambda points,*args:[route(points)]):
+            response=self.client.post('/api/plan',json={**self.payload,'mission_mode':'all','detour_minutes':0})
+        self.assertEqual(response.status_code,200)
+        data=response.get_json()
+        self.assertEqual(data['mission_mode'],'all')
+        self.assertEqual(len(data['mission_options']),6)
+        self.assertEqual(data['strategy'],'missions')
+        self.assertTrue(any(c['mode']=='supply' and c['available'] for c in data['mission_options']))
+
     def test_outside_stops_return_named_errors_before_any_routing(self):
         body={'start':[-1,0],'end':[1,1],'waypoints':[[.01,.01],[2,2]],
               'allowed_bounds':{'west':0,'south':0,'east':.02,'north':.02}}

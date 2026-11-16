@@ -502,6 +502,8 @@ def route_stop_labels(via,required,avoidance=False):
 
 
 def search_routes(start, end, cells, budget_seconds, router, progress=None, strategy='beam', workers=4, waypoints=None, team='BLUE', allowed_bounds=None, places_loader=None, place_options=None, blocked_roads=None, mission_mode='balanced'):
+    if mission_mode=='all':
+        return search_mission_options(start,end,cells,budget_seconds,router,progress=progress,workers=workers,waypoints=waypoints,team=team,allowed_bounds=allowed_bounds,places_loader=places_loader,place_options=place_options,blocked_roads=blocked_roads)
     team=validate_team(team)
     mission_mode=validate_mission_mode(mission_mode)
     options=validate_place_options(place_options)
@@ -671,3 +673,71 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
     if strategy=='compare':
         response['strategy_results']=results
     return response
+
+
+def search_mission_options(start,end,cells,budget_seconds,router,progress=None,workers=4,waypoints=None,team='BLUE',allowed_bounds=None,places_loader=None,place_options=None,blocked_roads=None):
+    """One choice per mission, with shared requests/data and bounded per-mode probes."""
+    options=validate_place_options(place_options)
+    modes=[key for key in MODES if key!='balanced']
+    cache={};lock=threading.Lock();timings=[];new_requests=0
+    place_cache={}
+    def shared_places(*args):
+        if 'data' not in place_cache:place_cache['data']=places_loader(*args)
+        return place_cache['data']
+    def shared_router(points,alternatives=False):
+        nonlocal new_requests
+        key=(tuple(tuple(p) for p in points),alternatives)
+        with lock:
+            owner=key not in cache
+            if owner:
+                if new_requests>=24:return []
+                new_requests+=1;cache[key]=Future()
+            future=cache[key]
+        if owner:
+            began=time.monotonic();failed=False
+            try:future.set_result(router(points,alternatives))
+            except BaseException as error:failed=True;future.set_exception(error)
+            finally:
+                with lock:timings.append((time.monotonic()-began,failed))
+        return future.result()
+    responses={};unavailable={};pool={}
+    for index,mode in enumerate(modes):
+        new_requests=0
+        if mode=='special_ops' and (not places_loader or not options['enabled'] or options['weight']<=0):
+            unavailable[mode]='Enable place bonuses with a positive weight to plan Special Operations.'
+            continue
+        def report(event):
+            if progress:progress({'percent':(index+event['percent']/100)*95/len(modes),'message':f"{MODES[mode][0]}: {event['message']}"})
+        response=search_routes(start,end,cells,budget_seconds,shared_router,progress=report,strategy='greedy',workers=workers,waypoints=waypoints,team=team,allowed_bounds=allowed_bounds,places_loader=shared_places if places_loader else None,place_options=options,blocked_roads=blocked_roads,mission_mode=mode)
+        responses[mode]=response
+        for route in [response['baseline'],*response['routes']]:
+            key=(tuple(tuple(p) for p in route['geometry']['coordinates']),tuple(tuple(p) for p in route.get('via_points',[])))
+            pool[key]=route
+    first=responses[modes[0]]
+    baseline=first['baseline'];places=first['places']
+    scorer=PlaceScorer(places,remaining=places['remaining'],excluded=places['excluded'],weight=options['weight']) if places['enabled'] else None
+    results=[];choices=[];baselines={}
+    for mode in modes:
+        name,description=MODES[mode]
+        if mode in unavailable:
+            choices.append(dict(mode=mode,name=name,description=description,available=False,message=unavailable[mode]));continue
+        context=MissionCells(cells,team,mode)
+        context.baseline_seconds=baseline['duration'];context.baseline_cells=route_grid_cells(baseline['geometry']['coordinates'])
+        baselines[mode]=opportunity_score(baseline,context,team=team,place_scorer=scorer)
+        ranked=[opportunity_score(route,context,team=team,place_scorer=scorer) for route in pool.values() if route['duration']<=baseline['duration']+budget_seconds+1e-6]
+        useful=[route for route in ranked if has_opportunities(route,options['weight'])]
+        if mode=='supply' and not useful:useful=[baselines[mode]]
+        if useful:
+            best=min(useful,key=route_rank)
+            choices.append(dict(mode=mode,name=name,description=description,available=True,route_index=len(results)))
+            results.append(dict(best,route_kind='mission',budget_used_fraction=round(max(0.,best['duration']-baseline['duration'])/max(1,budget_seconds),3)))
+        else:
+            choices.append(dict(mode=mode,name=name,description=description,available=False,message=responses[mode]['message']))
+    if progress:progress({'percent':98,'message':'Preparing the six mission options…'})
+    return dict(first,routes=results,mission_options=choices,mission_baselines=baselines,mission_mode='all',
+                mission={'id':'all','name':'All six missions','description':'One route per mission. Priority values use different weights and are not comparable between modes.'},
+                strategy='missions',no_opportunities=not results,total_provider_requests=len(timings),shared_provider_requests=len(cache),
+                failed_candidates=sum(failed for _,failed in timings),
+                routing_metrics={'workers':workers,'mean_request_seconds':round(sum(t for t,_ in timings)/max(1,len(timings)),2),'failed_requests':sum(failed for _,failed in timings)},
+                stats={'strategy':'missions','mission_provider_limit':24,'mission_count':6,'routing_workers':workers},
+                message='Compare one route per mission. Priority values are specific to each mode; identical roads can be useful for different objectives.')

@@ -55,6 +55,7 @@ const refreshingSquares=new Map();
 let squareRefreshLayers=null,squareRefreshRenderer=null;
 const squareVersion=cell=>`${cell.cell_id}:${cell.owner_team}:${cell.captured_at??''}`;
 try{capturedSquaresHidden=localStorage.getItem('hide-captured-squares')==='true';}catch{}
+let locatingStart=false;
 let searching = false, searchController = null, planningRoute = false, progressMinimized = false;
 const selectedLocations = {};
 let addressPreview=null;
@@ -173,6 +174,25 @@ function bindLocation(id){
  };
 }
 ['start','end'].forEach(bindLocation);
+$('start-current').onclick=async()=>{
+ if(searching||locatingStart)return;
+ const status=$('start-location-status'),button=$('start-current'),before=$('start').value;
+ if(!window.isSecureContext){status.textContent='Location needs HTTPS or localhost.';return;}
+ if(!navigator.geolocation){status.textContent='This browser does not support device location.';return;}
+ locatingStart=true;button.disabled=true;button.setAttribute('aria-busy','true');status.textContent='Finding your current location…';
+ try{
+  const position=await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,{enableHighAccuracy:true,timeout:15000,maximumAge:30000}));
+  const {latitude,longitude,accuracy}=position.coords;
+  if(!Number.isFinite(latitude)||!Number.isFinite(longitude)||Math.abs(latitude)>90||Math.abs(longitude)>180)throw Error('Invalid device location. Try again.');
+  if(searching||$('start').value!==before){status.textContent='Start changed while locating. Tap Use current location again if needed.';return;}
+  const text=`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+  clearAddress('start');$('start').value=text;selectedLocations.start={label:text,coordinates:[longitude,latitude]};
+  setMapPickTarget(null);clearDisplayedRoute();if(markers)updateMarkers();
+  status.textContent=`Start set to your current location${Number.isFinite(accuracy)?` · accuracy about ${Math.round(accuracy)} m`:''}. Choose Finish and plan your route.`;
+ }catch(error){
+  status.textContent=error.code===1?'Location access denied. Allow location in your browser settings and try again.':error.code===3?'Location lookup timed out. Try again.':error.message||'Your location is unavailable. Check device location settings and try again.';
+ }finally{locatingStart=false;button.disabled=searching;button.removeAttribute('aria-busy');}
+};
 $('swap-endpoints').onclick=()=>{
  if(searching)return;
  const startValue=$('start').value,endValue=$('end').value;
@@ -797,7 +817,7 @@ function drawBonusPlaces(){
  }
 }
 function missionValueDetails(route){
- const mode=result.mission||missionModes[route.mission_mode],weight=result.places?.weight??1;
+ const mode=missionModes[route.mission_mode]||result.mission,weight=result.places?.weight??1;
  const rows=(route.mission_breakdown||[]).map(row=>`<tr><th scope="row">${escape(row.label)} (${row.count})</th><td>${utility(row.priority)}</td></tr>`).join('');
  const rules={
   offensive:'Enemy difficulty priority × 3; unpainted squares 0.2 each; place bonus priority × 0.25.',
@@ -850,7 +870,8 @@ function drawRouteTargets(r){
 }
 function showRoute(index){
  routeIndex=index;
- const r=result.routes[index], base=result.baseline;
+ const r=result.routes[index], base=result.mission_baselines?.[r.mission_mode]||result.baseline;
+ const activeMission=missionModes[r.mission_mode]||result.mission;
  routeLayer.clearLayers();
  targets.clearLayers();
  drawRouteTargets(r);
@@ -860,14 +881,20 @@ function showRoute(index){
  map.fitBounds(line.getBounds(),{padding:[25,25]});
  const standardCount=result.routes.filter(v=>v.route_kind!=='wild').length;
  const hasWild=result.routes.some(v=>v.route_kind==='wild');
- const cards=result.routes.map((v,i)=>`<button class="card ${i===index?'selected':''}" data-route="${i}" data-route-kind="${v.route_kind||'standard'}" aria-pressed="${i===index}">${v.route_kind==='wild'?`Wild route ${i-standardCount+1}`:i===0?`Best ${hasWild?'standard ':''}${result.team} opportunity`:`Alternative ${i+1}`}<b>${utility(v.capture_value)} priority value</b><small>${v.reinforcement_count?`${v.reinforcement_count} reinforcement targets<br>`:''}${v.frontier_count&&v.mission_mode==='frontier'?`${v.frontier_count} adjoining unpainted squares<br>`:''}${v.route_kind==='wild'?`${escape(v.wild_direction)}<br>`:''}${v.target_count} raw targets · ${v.easy_enemy_count} easy enemy<br>${v.hard_enemy_count} defended · ${v.unknown_score_count} unknown score · ${v.unmapped_count} unpainted<br>${minutes(v.duration)} · ${miles(v.distance)}<br>+${minutes(Math.max(0,v.duration-base.duration))} vs fastest${v.budget_used_fraction!==undefined?` · ${Math.round(v.budget_used_fraction*100)}% of extra-time budget`:''}<br>${escape(routeCoverageText(v))}${v.place_bonus?`<br>+${utility(v.place_bonus)} estimated place points · ${v.place_count} places`:""}</small></button>`).join('');
+ let cards=result.routes.map((v,i)=>`<button class="card ${i===index?'selected':''}" data-route="${i}" data-route-kind="${v.route_kind||'standard'}" aria-pressed="${i===index}">${v.route_kind==='wild'?`Wild route ${i-standardCount+1}`:i===0?`Best ${hasWild?'standard ':''}${result.team} opportunity`:`Alternative ${i+1}`}<b>${utility(v.capture_value)} priority value</b><small>${v.reinforcement_count?`${v.reinforcement_count} reinforcement targets<br>`:''}${v.frontier_count&&v.mission_mode==='frontier'?`${v.frontier_count} adjoining unpainted squares<br>`:''}${v.route_kind==='wild'?`${escape(v.wild_direction)}<br>`:''}${v.target_count} raw targets · ${v.easy_enemy_count} easy enemy<br>${v.hard_enemy_count} defended · ${v.unknown_score_count} unknown score · ${v.unmapped_count} unpainted<br>${minutes(v.duration)} · ${miles(v.distance)}<br>+${minutes(Math.max(0,v.duration-base.duration))} vs fastest${v.budget_used_fraction!==undefined?` · ${Math.round(v.budget_used_fraction*100)}% of extra-time budget`:''}<br>${escape(routeCoverageText(v))}${v.place_bonus?`<br>+${utility(v.place_bonus)} estimated place points · ${v.place_count} places`:""}</small></button>`).join('');
+ if(result.mission_options){
+  cards=result.mission_options.map(option=>{
+   const v=option.available?result.routes[option.route_index]:null;
+   return `<button class="card ${v&&option.route_index===index?'selected':''}" data-route-kind="mission" data-mission="${escape(option.mode)}" ${v?`data-route="${option.route_index}" aria-pressed="${option.route_index===index}"`:'disabled'}>${escape(option.name)}${v?`<b>${utility(v.capture_value)} mission priority</b><small>${minutes(v.duration)} · ${miles(v.distance)} · +${minutes(Math.max(0,v.duration-base.duration))} vs fastest<br>${v.reinforcement_count||0} reinforcements · ${v.target_count} capture/exploration targets<br>+${utility(v.place_bonus||0)} estimated place points<br>Ranked within this mission</small>`:`<b>Unavailable</b><small>${escape(option.message)}</small>`}</button>`;
+  }).join('');
+ }
  const steps=[];
  r.legs.forEach((leg,legIndex)=>leg.steps.forEach(step=>{
   let text=instruction(step);
   if(step.maneuver.type==='arrive')text=legIndex===r.legs.length-1?'Arrive at Finish':`Reach ${r.stop_labels?.[legIndex]||'exploration detour'}; continue to the next leg`;
   steps.push(`<li><span>${escape(text)}</span><small>${miles(step.distance)}</small></li>`);
  }));
- $('results').innerHTML=`<div class="cards">${cards}</div><div class="routehead"><h2>Route briefing</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-modal" aria-haspopup="dialog">Navigate / send to phone</button><button id="download">GeoJSON</button><button id="clear-displayed-route" type="button">Clear route</button></div></div>${result.mission?`<p class="mission-brief"><strong>${escape(result.mission.name)}</strong> · ${escape(result.mission.description)}</p>`:''}<p class="trip">Start: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → Finish: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value${r.mission_mode&&r.mission_mode!=='balanced'?'':r.place_bonus?`<br>${utility(r.territory_value)} territory priority + ${utility(r.place_bonus)} estimated place points × ${result.places?.weight??1}`:''}<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p>${routeValueDetails(r)}${routeCoverageDetails(r)}${placeBonusDetails(r)}<ol class="steps">${steps.join('')}</ol>`;
+ $('results').innerHTML=`<div class="cards">${cards}</div>${result.mission_options?'<p class="fine mission-comparison-note">Each mission uses different priority weights. Compare driving time and objectives rather than priority numbers across modes. Different missions may choose the same roads.</p>':''}<div class="routehead"><h2>Route briefing</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-modal" aria-haspopup="dialog">Navigate / send to phone</button><button id="download">GeoJSON</button><button id="clear-displayed-route" type="button">Clear route</button></div></div>${activeMission?`<p class="mission-brief"><strong>${escape(activeMission.name)}</strong> · ${escape(activeMission.description)}</p>`:''}<p class="trip">Start: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → Finish: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value${r.mission_mode&&r.mission_mode!=='balanced'?'':r.place_bonus?`<br>${utility(r.territory_value)} territory priority + ${utility(r.place_bonus)} estimated place points × ${result.places?.weight??1}`:''}<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p>${routeValueDetails(r)}${routeCoverageDetails(r)}${placeBonusDetails(r)}<ol class="steps">${steps.join('')}</ol>`;
  document.querySelectorAll('[data-route]').forEach(el=>el.onclick=()=>showRoute(Number(el.dataset.route)));
  document.querySelectorAll('[data-used-place]').forEach(button=>button.onclick=()=>{
   const place=r.bonus_places.find(place=>place.id===Number(button.dataset.usedPlace));
@@ -879,7 +906,7 @@ function showRoute(index){
  };
  $('phone-navigation').onclick=()=>openNavigation(r);
  $('download').onclick=()=>{
-  const blob=new Blob([JSON.stringify({type:'Feature',geometry:r.geometry,properties:{team:result.team,mission_mode:result.mission_mode,mission:result.mission,mission_breakdown:r.mission_breakdown,reinforcement_count:r.reinforcement_count,place_bonus:r.place_bonus,bonus_places:r.bonus_places,territory_value:r.territory_value,allowed_bounds:result.allowed_bounds,blocked_roads:result.blocked_roads,radio_coverage:r.radio_coverage,duration_seconds:r.duration,target_count:r.target_count,capture_value:r.capture_value,easy_enemy_count:r.easy_enemy_count,hard_enemy_count:r.hard_enemy_count,required_waypoints:result.required_waypoints}},null,2)],{type:'application/geo+json'});
+  const blob=new Blob([JSON.stringify({type:'Feature',geometry:r.geometry,properties:{team:result.team,mission_mode:r.mission_mode||result.mission_mode,mission:missionModes[r.mission_mode]||result.mission,mission_breakdown:r.mission_breakdown,reinforcement_count:r.reinforcement_count,place_bonus:r.place_bonus,bonus_places:r.bonus_places,territory_value:r.territory_value,allowed_bounds:result.allowed_bounds,blocked_roads:result.blocked_roads,radio_coverage:r.radio_coverage,duration_seconds:r.duration,target_count:r.target_count,capture_value:r.capture_value,easy_enemy_count:r.easy_enemy_count,hard_enemy_count:r.hard_enemy_count,required_waypoints:result.required_waypoints}},null,2)],{type:'application/geo+json'});
   const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`${result.team.toLowerCase()}-route.geojson`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
  };
 }
@@ -1428,6 +1455,7 @@ function updateTeam(){
  if(boardAvailable)$('status').textContent=`Team ${team} selected. Run a new search to plan for this team.`;
 }
 const missionModes={
+ all:{name:'All six missions',description:'Compare one route for each mission using shared routing requests. Each mission has its own priority weights; unavailable objectives are shown separately.'},
  offensive:{name:'Offensive Strike',description:'Prioritize vulnerable enemy squares. Unpainted ground and places are secondary.'},
  fortify:{name:'Fortify',description:'Reinforce weak friendly squares, especially along enemy borders. Reinforcement does not add square-held points.'},
  frontier:{name:'Frontier Patrol',description:'Favor unpainted squares adjoining your team’s territory. Unknown coverage remains exploration.'},
@@ -1438,6 +1466,7 @@ const missionModes={
 function updateMissionMode(clear=true){
  const mode=missionModes[$('mission-mode').value];
  $('mission-mode-help').textContent=mode.description;
+ $('strategy-options').hidden=$('mission-mode').value==='all';
  if($('mission-mode').value==='special_ops'){
   $('include-places').checked=true;if(Number($('place-weight').value)<=0)$('place-weight').value='1';
  }
@@ -1829,6 +1858,7 @@ function setSearching(active){
  for(const id of ['mission-mode','draw-blocked-road','clear-blocked-roads','include-places','place-weight','place-remaining','draw-route-area','draw-route-polygon','team','start','end','start-lookup','end-lookup','start-map','end-map','swap-endpoints','budget','strategy','submit','print'])$(id).disabled=active;
  $('submit').textContent=active ? 'Scouting routes…' : `Plan ${selectedTeam()} operation →`;
  $('submit').disabled=active||!boardAvailable;
+ $('start-current').disabled=active||locatingStart;
  $('results').setAttribute('aria-busy',String(active));
  document.querySelectorAll('.address-options button, #comparison button, #waypoints input, #waypoints button').forEach(button=>button.disabled=active);
  drawBlockedRoads();
@@ -1902,7 +1932,7 @@ async function planTrip(resuming=null){
   $('progress-bar').value=100;$('progress-percent').textContent='100%';$('progress-stage').textContent='Search complete';
   showComparison();showActiveResult();
   completed=true;
-  $('status').textContent=data.no_opportunities?(data.message||'No opportunities found for this mission within the budget.'):`${data.strategy==='beam'?'Beam':'Greedy'}: ${data.routes.length} route options within budget. ${data.routing_metrics?.workers||1} routing workers; average request ${data.routing_metrics?.mean_request_seconds||0}s (including queue/rate-limit waits). ${data.failed_candidates ? `${data.failed_candidates} detour requests failed. ` : ''}${data.mission_mode==='fortify'?'Amber outlines show reinforcement targets; reinforcement adds no immediate square-held points.':'Green outlines show mission targets; capture is not guaranteed.'}`;
+  $('status').textContent=data.mission_options?`${data.routes.length} of 6 mission routes available. Priority values use different weights; compare the objectives, driving time, and targets.`:data.no_opportunities?(data.message||'No opportunities found for this mission within the budget.'):`${data.strategy==='beam'?'Beam':'Greedy'}: ${data.routes.length} route options within budget. ${data.routing_metrics?.workers||1} routing workers; average request ${data.routing_metrics?.mean_request_seconds||0}s (including queue/rate-limit waits). ${data.failed_candidates ? `${data.failed_candidates} detour requests failed. ` : ''}${data.mission_mode==='fortify'?'Amber outlines show reinforcement targets; reinforcement adds no immediate square-held points.':'Green outlines show mission targets; capture is not guaranteed.'}`;
  }catch(error){
   const cancelled=error.name==='AbortError';
   invalidStop=error.invalidStop;failed=!cancelled;

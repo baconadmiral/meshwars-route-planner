@@ -233,3 +233,5 @@ body.search-modal-open{overflow:hidden}
 .quick-capture-filter #capture-calendar-note{font-size:10px;line-height:1.4;margin:4px 0;color:var(--muted)}
 
 #find-capture-areas:disabled{cursor:not-allowed}
+
+.start-current{min-height:44px;margin-top:8px;font-size:12px}#start-location-status:empty{display:none}#strategy-options[hidden]{display:none}.card[data-route-kind="mission"]:before{content:"MISSION OPTION"}.card[data-route-kind="mission"]:disabled{cursor:default;opacity:.65}
