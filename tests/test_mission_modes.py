@@ -117,3 +117,52 @@ class MissionModeTests(unittest.TestCase):
         for mode in (None,[],False,'unknown'):
             with self.assertRaises(ValueError):search_routes([0,0],[.01,0],[],60,router,mission_mode=mode)
         router.assert_not_called()
+
+    def test_all_missions_share_provider_and_places_but_select_by_objective(self):
+        start,end=[.001,.001],[.01,.001]
+        direct=route([start,end],100)
+        detour=route([start,[.001,.004],[.01,.004],end],120)
+        rows=[cell(0,c) for c in range(3)]+[cell(1,c,'BLUE',0) for c in range(3)]
+        calls=[]
+        def router(points,alternatives=False):calls.append((points,alternatives));return [direct,detour]
+        data={'available':True,'week_start':current_week(),'places':[{'id':1,'name':'Landmark','type':'landmark','lat':.001,'lon':.001,'points':25,'rotates':True}],'truncated':False}
+        loader=Mock(return_value=data)
+        progress=[]
+        result=search_routes(start,end,rows,30,router,mission_mode='all',places_loader=loader,progress=progress.append)
+        self.assertEqual(len(result['mission_options']),6)
+        self.assertEqual(len(result['routes']),6)
+        self.assertEqual(len({r['mission_mode'] for r in result['routes']}),6)
+        by_mode={r['mission_mode']:r for r in result['routes']}
+        self.assertEqual(by_mode['offensive']['geometry'],direct['geometry'])
+        self.assertEqual(by_mode['fortify']['geometry'],detour['geometry'])
+        self.assertGreater(by_mode['fortify']['reinforcement_count'],0)
+        self.assertTrue(all(r['duration']<=130 for r in result['routes']))
+        self.assertEqual(len(calls),result['total_provider_requests'])
+        self.assertLessEqual(len(calls),6*24)
+        self.assertEqual(len(calls),len({(tuple(map(tuple,p)),a) for p,a in calls}))
+        loader.assert_called_once()
+        self.assertEqual([p['percent'] for p in progress],sorted(p['percent'] for p in progress))
+
+    def test_all_missions_unavailable_objectives_and_direct_supply_fallback(self):
+        start,end=[.0001,.0001],[.001,.001]
+        result=search_routes(start,end,[cell(0,0,'BLUE',0)],0,lambda *args:[route([start,end])],mission_mode='all',place_options={'enabled':False})
+        choices={c['mode']:c for c in result['mission_options']}
+        self.assertFalse(choices['special_ops']['available'])
+        self.assertFalse(choices['offensive']['available'])
+        self.assertTrue(choices['fortify']['available'])
+        self.assertTrue(choices['supply']['available'])
+        supply=result['routes'][choices['supply']['route_index']]
+        self.assertEqual(supply['capture_value'],0)
+        self.assertEqual(supply['geometry']['coordinates'],[start,end])
+
+    def test_all_missions_keep_bounds_blocks_and_ordered_waypoints(self):
+        start,end=[-.01,0],[.01,0];required=[[-.005,.004]]
+        block={'coordinates':[[0,-.001],[0,.001]],'buffer_meters':20}
+        bounds={'west':-.02,'east':.02,'south':-.02,'north':.02}
+        def router(points,alternatives=False):return [route(points,100+10*len(points))]
+        result=search_routes(start,end,[],30,router,mission_mode='all',waypoints=required,blocked_roads=[block],allowed_bounds=bounds)
+        for r in result['routes']:
+            self.assertFalse(route_blocked(r,[block]))
+            self.assertTrue(route_inside(r,bounds))
+            self.assertIn(required[0],r['via_points'])
+            self.assertLessEqual(r['duration'],result['baseline']['duration']+30)

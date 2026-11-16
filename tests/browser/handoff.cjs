@@ -66,7 +66,7 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
    assert.equal(await page.locator('#end').isVisible(),true);
    assert.equal(await page.locator('#budget').isVisible(),true);
    assert.equal(await page.locator('#capture-days').isVisible(),true);
-   assert.equal(await page.locator('#mission-mode option').count(),6);
+   assert.equal(await page.locator('#mission-mode option').count(),7);
    assert.equal(await page.locator('#mission-mode').isVisible(),true);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),true);
    assert.equal(await page.locator('#drive-player').isVisible(),false);

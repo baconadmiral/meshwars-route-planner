@@ -1,0 +1,1888 @@
+{
+  "routes": [
+    {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 15.25,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "offensive",
+      "mission_target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "mission_target_count": 3,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [
+        {
+          "label": "Easy enemy squares",
+          "count": 3,
+          "priority": 9.0
+        }
+      ],
+      "mission_territory_value": 9.0,
+      "mission_place_value": 6.25,
+      "mission_place_multiplier": 0.25,
+      "mission_multiplier": 1.0,
+      "route_kind": "mission",
+      "budget_used_fraction": 0.0,
+      "radio_coverage": {
+        "verified_tx": 0,
+        "passive_rx_only": 0,
+        "unknown": 3,
+        "targets": {
+          "verified_tx": 0,
+          "passive_rx_only": 0,
+          "unknown": 3
+        },
+        "proximity_meters": 50
+      }
+    },
+    {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.001,
+            0.004
+          ],
+          [
+            0.01,
+            0.004
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 120,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 30.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.001,
+                    0.004
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.001,
+                  0.004
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 30.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.004
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.004
+                  ],
+                  [
+                    0.01,
+                    0.004
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.004
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 30.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.01,
+                  0.004
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.01,
+                    0.004
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 2.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 2.0,
+      "square_count": 5,
+      "target_count": 2,
+      "target_ids": [
+        "0_0",
+        "0_2"
+      ],
+      "enemy_count": 2,
+      "unmapped_count": 0,
+      "capture_value": 9.0,
+      "easy_enemy_count": 2,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "fortify",
+      "mission_target_ids": [
+        "1_0",
+        "1_1",
+        "1_2"
+      ],
+      "mission_target_count": 3,
+      "reinforcement_ids": [
+        "1_0",
+        "1_1",
+        "1_2"
+      ],
+      "reinforcement_count": 3,
+      "frontier_count": 0,
+      "mission_breakdown": [
+        {
+          "label": "Friendly reinforcement",
+          "count": 3,
+          "priority": 9.0
+        }
+      ],
+      "mission_territory_value": 9.0,
+      "mission_place_value": 0.0,
+      "mission_place_multiplier": 0.0,
+      "mission_multiplier": 1.0,
+      "route_kind": "mission",
+      "budget_used_fraction": 0.667,
+      "radio_coverage": {
+        "verified_tx": 0,
+        "passive_rx_only": 0,
+        "unknown": 5,
+        "targets": {
+          "verified_tx": 0,
+          "passive_rx_only": 0,
+          "unknown": 3
+        },
+        "proximity_meters": 50
+      }
+    },
+    {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 6.85,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "frontier",
+      "mission_target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "mission_target_count": 3,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [
+        {
+          "label": "Easy enemy squares",
+          "count": 3,
+          "priority": 0.6000000000000001
+        }
+      ],
+      "mission_territory_value": 0.6000000000000001,
+      "mission_place_value": 6.25,
+      "mission_place_multiplier": 0.25,
+      "mission_multiplier": 1.0,
+      "route_kind": "mission",
+      "budget_used_fraction": 0.0,
+      "radio_coverage": {
+        "verified_tx": 0,
+        "passive_rx_only": 0,
+        "unknown": 3,
+        "targets": {
+          "verified_tx": 0,
+          "passive_rx_only": 0,
+          "unknown": 3
+        },
+        "proximity_meters": 50
+      }
+    },
+    {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.001,
+            0.004
+          ],
+          [
+            0.01,
+            0.004
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 120,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 30.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.001,
+                    0.004
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.001,
+                  0.004
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 30.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.004
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.004
+                  ],
+                  [
+                    0.01,
+                    0.004
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.004
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 30.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.01,
+                  0.004
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.01,
+                    0.004
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 2.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 2.0,
+      "square_count": 5,
+      "target_count": 2,
+      "target_ids": [
+        "0_0",
+        "0_2"
+      ],
+      "enemy_count": 2,
+      "unmapped_count": 0,
+      "capture_value": 21.025,
+      "easy_enemy_count": 2,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "flanking",
+      "mission_target_ids": [
+        "0_0",
+        "0_2"
+      ],
+      "mission_target_count": 2,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [
+        {
+          "label": "Easy enemy squares",
+          "count": 2,
+          "priority": 2.0
+        }
+      ],
+      "mission_territory_value": 2.0,
+      "mission_place_value": 12.5,
+      "mission_place_multiplier": 0.5,
+      "mission_multiplier": 1.45,
+      "route_kind": "mission",
+      "budget_used_fraction": 0.667,
+      "radio_coverage": {
+        "verified_tx": 0,
+        "passive_rx_only": 0,
+        "unknown": 5,
+        "targets": {
+          "verified_tx": 0,
+          "passive_rx_only": 0,
+          "unknown": 2
+        },
+        "proximity_meters": 50
+      }
+    },
+    {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 75.0,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "special_ops",
+      "mission_target_ids": [],
+      "mission_target_count": 0,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [],
+      "mission_territory_value": 0,
+      "mission_place_value": 75.0,
+      "mission_place_multiplier": 3.0,
+      "mission_multiplier": 1.0,
+      "route_kind": "mission",
+      "budget_used_fraction": 0.0,
+      "radio_coverage": {
+        "verified_tx": 0,
+        "passive_rx_only": 0,
+        "unknown": 3,
+        "targets": {
+          "verified_tx": 0,
+          "passive_rx_only": 0,
+          "unknown": 0
+        },
+        "proximity_meters": 50
+      }
+    },
+    {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 28.0,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "supply",
+      "mission_target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "mission_target_count": 3,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [
+        {
+          "label": "Easy enemy squares",
+          "count": 3,
+          "priority": 3.0
+        }
+      ],
+      "mission_territory_value": 3.0,
+      "mission_place_value": 25.0,
+      "mission_place_multiplier": 1.0,
+      "mission_multiplier": 1.0,
+      "route_kind": "mission",
+      "budget_used_fraction": 0.0,
+      "radio_coverage": {
+        "verified_tx": 0,
+        "passive_rx_only": 0,
+        "unknown": 3,
+        "targets": {
+          "verified_tx": 0,
+          "passive_rx_only": 0,
+          "unknown": 3
+        },
+        "proximity_meters": 50
+      }
+    }
+  ],
+  "failed_candidates": 0,
+  "no_opportunities": false,
+  "stats": {
+    "strategy": "missions",
+    "mission_provider_limit": 24,
+    "mission_count": 6,
+    "routing_workers": 4
+  },
+  "baseline": {
+    "geometry": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          0.001,
+          0.001
+        ],
+        [
+          0.01,
+          0.001
+        ]
+      ]
+    },
+    "duration": 100,
+    "distance": 1000,
+    "legs": [
+      {
+        "steps": [
+          {
+            "name": "Fixture road",
+            "distance": 500,
+            "duration": 50.0,
+            "maneuver": {
+              "type": "depart",
+              "location": [
+                0.001,
+                0.001
+              ]
+            },
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [
+                  0.001,
+                  0.001
+                ],
+                [
+                  0.01,
+                  0.001
+                ]
+              ]
+            }
+          },
+          {
+            "name": "",
+            "distance": 0,
+            "duration": 0,
+            "maneuver": {
+              "type": "arrive",
+              "location": [
+                0.01,
+                0.001
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "via_points": [],
+    "stop_labels": [],
+    "place_bonus": 25,
+    "place_bonus_uncapped": 25,
+    "bonus_places": [
+      {
+        "id": 1,
+        "name": "Fixture landmark",
+        "type": "landmark",
+        "lat": 0.001,
+        "lon": 0.001,
+        "points": 25,
+        "rotates": true,
+        "eligibility_basis": "point cell plus eight adjacent cells"
+      }
+    ],
+    "place_count": 1,
+    "place_bonus_estimated": true,
+    "territory_breakdown": {
+      "easy_enemy": 3.0,
+      "defended_enemy": 0,
+      "unknown_enemy": 0.0,
+      "unpainted": 0.0
+    },
+    "territory_value": 3.0,
+    "square_count": 3,
+    "target_count": 3,
+    "target_ids": [
+      "0_0",
+      "0_1",
+      "0_2"
+    ],
+    "enemy_count": 3,
+    "unmapped_count": 0,
+    "capture_value": 15.25,
+    "easy_enemy_count": 3,
+    "hard_enemy_count": 0,
+    "unknown_score_count": 0,
+    "mission_mode": "offensive",
+    "mission_target_ids": [
+      "0_0",
+      "0_1",
+      "0_2"
+    ],
+    "mission_target_count": 3,
+    "reinforcement_ids": [],
+    "reinforcement_count": 0,
+    "frontier_count": 0,
+    "mission_breakdown": [
+      {
+        "label": "Easy enemy squares",
+        "count": 3,
+        "priority": 9.0
+      }
+    ],
+    "mission_territory_value": 9.0,
+    "mission_place_value": 6.25,
+    "mission_place_multiplier": 0.25,
+    "mission_multiplier": 1.0,
+    "radio_coverage": {
+      "verified_tx": 0,
+      "passive_rx_only": 0,
+      "unknown": 3,
+      "targets": {
+        "verified_tx": 0,
+        "passive_rx_only": 0,
+        "unknown": 3
+      },
+      "proximity_meters": 50
+    }
+  },
+  "team": "BLUE",
+  "strategy": "missions",
+  "required_waypoints": [],
+  "allowed_bounds": null,
+  "blocked_roads": [],
+  "shared_provider_requests": 28,
+  "total_provider_requests": 28,
+  "routing_metrics": {
+    "workers": 4,
+    "mean_request_seconds": 0.0,
+    "failed_requests": 0
+  },
+  "message": "Compare one route per mission. Priority values are specific to each mode; identical roads can be useful for different objectives.",
+  "mission": {
+    "id": "all",
+    "name": "All six missions",
+    "description": "One route per mission. Priority values use different weights and are not comparable between modes."
+  },
+  "mission_mode": "all",
+  "places": {
+    "available": true,
+    "week_start": "2026-11-11",
+    "places": [
+      {
+        "id": 1,
+        "name": "Fixture landmark",
+        "type": "landmark",
+        "lat": 0.001,
+        "lon": 0.001,
+        "points": 25,
+        "rotates": true
+      }
+    ],
+    "truncated": false,
+    "enabled": true,
+    "weight": 1,
+    "remaining": 100,
+    "excluded": [],
+    "eligibility_partial": false
+  },
+  "mission_options": [
+    {
+      "mode": "offensive",
+      "name": "Offensive Strike",
+      "description": "Prioritize vulnerable enemy squares; unpainted ground and place bonuses are secondary.",
+      "available": true,
+      "route_index": 0
+    },
+    {
+      "mode": "fortify",
+      "name": "Fortify",
+      "description": "Reinforce low-score friendly squares, especially where they border enemy territory.",
+      "available": true,
+      "route_index": 1
+    },
+    {
+      "mode": "frontier",
+      "name": "Frontier Patrol",
+      "description": "Expand into unpainted squares adjoining your team\u2019s territory.",
+      "available": true,
+      "route_index": 2
+    },
+    {
+      "mode": "flanking",
+      "name": "Flanking Maneuver",
+      "description": "Explore wider loops and prioritize opportunities away from the fastest baseline.",
+      "available": true,
+      "route_index": 3
+    },
+    {
+      "mode": "special_ops",
+      "name": "Special Operations",
+      "description": "Seek eligible place bonuses within your remaining weekly allowance.",
+      "available": true,
+      "route_index": 4
+    },
+    {
+      "mode": "supply",
+      "name": "Supply Run",
+      "description": "Make the trip productive while favoring opportunities requiring little extra time.",
+      "available": true,
+      "route_index": 5
+    }
+  ],
+  "mission_baselines": {
+    "offensive": {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 15.25,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "offensive",
+      "mission_target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "mission_target_count": 3,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [
+        {
+          "label": "Easy enemy squares",
+          "count": 3,
+          "priority": 9.0
+        }
+      ],
+      "mission_territory_value": 9.0,
+      "mission_place_value": 6.25,
+      "mission_place_multiplier": 0.25,
+      "mission_multiplier": 1.0
+    },
+    "fortify": {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 0.0,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "fortify",
+      "mission_target_ids": [],
+      "mission_target_count": 0,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [],
+      "mission_territory_value": 0,
+      "mission_place_value": 0.0,
+      "mission_place_multiplier": 0.0,
+      "mission_multiplier": 1.0
+    },
+    "frontier": {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 6.85,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "frontier",
+      "mission_target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "mission_target_count": 3,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [
+        {
+          "label": "Easy enemy squares",
+          "count": 3,
+          "priority": 0.6000000000000001
+        }
+      ],
+      "mission_territory_value": 0.6000000000000001,
+      "mission_place_value": 6.25,
+      "mission_place_multiplier": 0.25,
+      "mission_multiplier": 1.0
+    },
+    "flanking": {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 15.5,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "flanking",
+      "mission_target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "mission_target_count": 3,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [
+        {
+          "label": "Easy enemy squares",
+          "count": 3,
+          "priority": 3.0
+        }
+      ],
+      "mission_territory_value": 3.0,
+      "mission_place_value": 12.5,
+      "mission_place_multiplier": 0.5,
+      "mission_multiplier": 1.0
+    },
+    "special_ops": {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 75.0,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "special_ops",
+      "mission_target_ids": [],
+      "mission_target_count": 0,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [],
+      "mission_territory_value": 0,
+      "mission_place_value": 75.0,
+      "mission_place_multiplier": 3.0,
+      "mission_multiplier": 1.0
+    },
+    "supply": {
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.001,
+            0.001
+          ],
+          [
+            0.01,
+            0.001
+          ]
+        ]
+      },
+      "duration": 100,
+      "distance": 1000,
+      "legs": [
+        {
+          "steps": [
+            {
+              "name": "Fixture road",
+              "distance": 500,
+              "duration": 50.0,
+              "maneuver": {
+                "type": "depart",
+                "location": [
+                  0.001,
+                  0.001
+                ]
+              },
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    0.001,
+                    0.001
+                  ],
+                  [
+                    0.01,
+                    0.001
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "",
+              "distance": 0,
+              "duration": 0,
+              "maneuver": {
+                "type": "arrive",
+                "location": [
+                  0.01,
+                  0.001
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "via_points": [],
+      "stop_labels": [],
+      "place_bonus": 25,
+      "place_bonus_uncapped": 25,
+      "bonus_places": [
+        {
+          "id": 1,
+          "name": "Fixture landmark",
+          "type": "landmark",
+          "lat": 0.001,
+          "lon": 0.001,
+          "points": 25,
+          "rotates": true,
+          "eligibility_basis": "point cell plus eight adjacent cells"
+        }
+      ],
+      "place_count": 1,
+      "place_bonus_estimated": true,
+      "territory_breakdown": {
+        "easy_enemy": 3.0,
+        "defended_enemy": 0,
+        "unknown_enemy": 0.0,
+        "unpainted": 0.0
+      },
+      "territory_value": 3.0,
+      "square_count": 3,
+      "target_count": 3,
+      "target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "enemy_count": 3,
+      "unmapped_count": 0,
+      "capture_value": 28.0,
+      "easy_enemy_count": 3,
+      "hard_enemy_count": 0,
+      "unknown_score_count": 0,
+      "mission_mode": "supply",
+      "mission_target_ids": [
+        "0_0",
+        "0_1",
+        "0_2"
+      ],
+      "mission_target_count": 3,
+      "reinforcement_ids": [],
+      "reinforcement_count": 0,
+      "frontier_count": 0,
+      "mission_breakdown": [
+        {
+          "label": "Easy enemy squares",
+          "count": 3,
+          "priority": 3.0
+        }
+      ],
+      "mission_territory_value": 3.0,
+      "mission_place_value": 25.0,
+      "mission_place_multiplier": 1.0,
+      "mission_multiplier": 1.0
+    }
+  },
+  "radio_coverage": {
+    "configured": false
+  }
+}

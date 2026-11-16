@@ -13,7 +13,7 @@ MODES={
 
 
 def validate_mission_mode(value='balanced'):
-    if not isinstance(value,str) or value not in MODES:raise ValueError('Choose a valid mission mode.')
+    if not isinstance(value,str) or (value not in MODES and value!='all'):raise ValueError('Choose a valid mission mode.')
     return value
 
 
