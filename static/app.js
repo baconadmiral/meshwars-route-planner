@@ -435,7 +435,9 @@ function squareStyle(cell){
          fillColor:`rgb(${rgb.join(',')})`,fillOpacity:intensity*scoreOpacity};
 }
 function captureVisible(cell,now=Date.now()/1000){
- if(capturedSquaresHidden&&cell)return false;
+ return !(capturedSquaresHidden&&cell)&&captureMatchesFilters(cell,now);
+}
+function captureMatchesFilters(cell,now=Date.now()/1000){
  if(mapPlayerFilter&&!cell)return false;
  if(mapPlayerFilter==='__unknown__'&&cell?.captured_by)return false;
  if(mapPlayerFilter&&mapPlayerFilter!=='__unknown__'&&cell?.captured_by?.toLocaleLowerCase()!==mapPlayerFilter.toLocaleLowerCase())return false;
@@ -481,8 +483,8 @@ function rankCaptureAreas(cells){
  }).sort((a,b)=>b.count-a.count||b.newest-a.newest||a.key.localeCompare(b.key));
 }
 let captureAreas=[],captureAreaIndex=-1,captureAreaFingerprint=null;
-function captureAreaCells(){const now=Date.now()/1000;return board.filter(c=>captureVisible(c,now));}
-function captureAreaKey(cells){return `${mapTeamFilter}|${mapPlayerFilter}|${captureDays}|${capturedSquaresHidden}|`+cells.map(c=>`${squareVersion(c)}:${c.west},${c.south},${c.east},${c.north}`).join(';');}
+function captureAreaCells(){const now=Date.now()/1000;return board.filter(c=>captureMatchesFilters(c,now));}
+function captureAreaKey(cells){return `${mapTeamFilter}|${mapPlayerFilter}|${captureDays}|`+cells.map(c=>`${squareVersion(c)}:${c.west},${c.south},${c.east},${c.north}`).join(';');}
 function updateCaptureAreaControls(cells){
  if(captureAreaFingerprint!==null&&captureAreaFingerprint!==captureAreaKey(cells)){
   captureAreas=[];captureAreaIndex=-1;captureAreaFingerprint=null;
@@ -491,7 +493,7 @@ function updateCaptureAreaControls(cells){
  $('next-capture-area').disabled=captureAreas.length<2;
  const button=$('find-capture-areas'),wasDisabled=button.disabled;
  button.disabled=cells.length===0;
- const emptyMessage=capturedSquaresHidden?'Show captured squares first to run Recon sweep.':!boardAvailable?'Capture data is not available yet.':'No matching territory squares. Change the date, team, or player filter to run Recon sweep.';
+ const emptyMessage=!boardAvailable?'Capture data is not available yet.':'No matching territory squares. Change the date, team, or player filter to run Recon sweep.';
  button.title=button.disabled?emptyMessage:'Find concentrations of squares matching the map filters';
  if(button.disabled)$('capture-area-status').textContent=emptyMessage;
  else if(wasDisabled&&captureAreaIndex<0)$('capture-area-status').textContent='Matching territory found. Run Recon sweep to locate capture areas.';
@@ -504,7 +506,7 @@ function fitCaptureBounds(bounds){
 function showCaptureArea(){
  const area=captureAreas[captureAreaIndex];if(!area)return;
  const newest=area.newest?` · newest ${new Date(area.newest*1000).toLocaleDateString()}`:'';
- $('capture-area-status').textContent=`Area ${captureAreaIndex+1} of ${captureAreas.length} · ${area.count.toLocaleString()} matching ${mapTeamFilter||'all-team'} ${area.count===1?'square':'squares'}${newest}. Capture areas, not Explorer visit history.`;
+ $('capture-area-status').textContent=`Area ${captureAreaIndex+1} of ${captureAreas.length} · ${area.count.toLocaleString()} matching ${mapTeamFilter||'all-team'} ${area.count===1?'square':'squares'}${newest}. Capture areas, not Explorer visit history.${capturedSquaresHidden?' Captured-square overlay remains hidden.':''}`;
  fitCaptureBounds(area.bounds);
 }
 $('find-capture-areas').onclick=()=>{
@@ -512,7 +514,7 @@ $('find-capture-areas').onclick=()=>{
  const cells=captureAreaCells();captureAreas=rankCaptureAreas(cells);captureAreaFingerprint=captureAreaKey(cells);captureAreaIndex=captureAreas.length?0:-1;
  updateCaptureAreaControls(cells);
  if(captureAreas.length)showCaptureArea();
- else $('capture-area-status').textContent=capturedSquaresHidden?'Show captured squares first to find capture areas.':'No squares match these filters. Widen the date range or change the team/player filter.';
+ else $('capture-area-status').textContent='No squares match these filters. Widen the date range or change the team/player filter.';
 };
 $('next-capture-area').onclick=()=>{
  const cells=captureAreaCells();updateCaptureAreaControls(cells);
@@ -522,9 +524,9 @@ $('next-capture-area').onclick=()=>{
 $('all-capture-matches').onclick=()=>{
  if(!map)return;
  const cells=captureAreaCells();updateCaptureAreaControls(cells);
- if(!cells.length){$('capture-area-status').textContent=capturedSquaresHidden?'Show captured squares first to find capture areas.':'No squares match these filters.';return;}
+ if(!cells.length){$('capture-area-status').textContent='No squares match these filters.';return;}
  const bounds=L.latLngBounds(cells.flatMap(c=>[[c.south,c.west],[c.north,c.east]]));
- $('capture-area-status').textContent=`Showing all ${cells.length.toLocaleString()} matching squares across the loaded board. Capture times do not show all Explorer visits.`;
+ $('capture-area-status').textContent=`Showing all ${cells.length.toLocaleString()} matching squares across the loaded board. Capture times do not show all Explorer visits.${capturedSquaresHidden?' Captured-square overlay remains hidden.':''}`;
  fitCaptureBounds(bounds);
 };
 function drawBoard(){
@@ -538,9 +540,10 @@ function drawBoard(){
  scheduleSquareLookups();
  const bounds=map.getBounds();
  const now=Date.now()/1000;
- const eligible=board.filter(c=>captureVisible(c,now));
- updateCaptureAreaControls(eligible);
- $('capture-filter-status').textContent=`${capturedSquaresHidden?'Captured squares hidden. ':''}${eligible.length.toLocaleString()} of ${board.length.toLocaleString()} squares match the display filters for ${mapTeamFilter||'all teams'}${mapPlayerFilter?' · '+(mapPlayerFilter==='__unknown__'?'unknown capturer':mapPlayerFilter):''}.${captureDays>0?' Missing or future capture times are hidden.':''}`;
+ const matching=board.filter(c=>captureMatchesFilters(c,now));
+ const eligible=capturedSquaresHidden?[]:matching;
+ updateCaptureAreaControls(matching);
+ $('capture-filter-status').textContent=`${capturedSquaresHidden?'Captured-square overlay hidden. ':''}${matching.length.toLocaleString()} of ${board.length.toLocaleString()} squares match the display filters for ${mapTeamFilter||'all teams'}${mapPlayerFilter?' · '+(mapPlayerFilter==='__unknown__'?'unknown capturer':mapPlayerFilter):''}.${captureDays>0?' Missing or future capture times are hidden.':''}`;
  const visible=eligible.filter(c=>bounds.intersects([[c.south,c.west],[c.north,c.east]]));
  if(targets && result?.routes?.[routeIndex])drawRouteTargets(result.routes[routeIndex]);
  if(visible.length>2500){return;}
