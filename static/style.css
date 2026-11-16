@@ -235,3 +235,24 @@ body.search-modal-open{overflow:hidden}
 #find-capture-areas:disabled{cursor:not-allowed}
 
 .start-current{min-height:44px;margin-top:8px;font-size:12px}#start-location-status:empty{display:none}#strategy-options[hidden]{display:none}.card[data-route-kind="mission"]:before{content:"MISSION OPTION"}.card[data-route-kind="mission"]:disabled{cursor:default;opacity:.65}
+
+.osmand-send{min-height:44px;background:var(--tactical,var(--accent));color:var(--tactical-ink,#fff);font-weight:700}.osmand-handoff{padding:16px 20px;background:var(--soft);border-bottom:1px solid var(--border)}.osmand-handoff h3{margin:0 0 10px}.osmand-handoff p{margin-bottom:0}.routehead .osmand-send{padding:12px 16px}.osmand-send:disabled{cursor:wait}
+
+.route-options-title{margin:0 0 18px;font-size:20px}
+@media screen{
+ .map-first-layout .mobile-recon-heading{flex-wrap:wrap}
+ .map-first-layout .mobile-recon-heading h2{flex:1 1 120px}
+ .map-first-layout .workspace:not(.plan-hidden){height:auto;min-height:0;overflow:visible}
+ .map-first-layout .workspace:not(.plan-hidden) #map{height:clamp(260px,42dvh,420px);min-height:260px;flex:0 0 clamp(260px,42dvh,420px)}
+ .map-first-layout #map-divider{display:none}
+ .map-first-layout #route-pane{flex:none;overflow:visible;height:auto;min-height:0;border-top:4px solid var(--tactical,var(--accent));background:var(--soft)}
+ .map-first-layout #results{padding:24px 20px 32px}
+ .map-first-layout .cards{display:grid;grid-template-columns:1fr;gap:16px}
+ .map-first-layout .card{min-width:0;padding:20px}
+ .map-first-layout .card small{font-size:12px;line-height:1.7}
+ .map-first-layout .routehead{padding-top:20px;margin-top:24px;border-top:1px solid var(--border)}
+ .map-first-layout .routehead .route-actions{width:100%;gap:10px}
+ .map-first-layout .routehead .route-actions button{flex:1 1 150px;min-height:44px}
+}
+
+.route-share-quick{padding:14px;margin-bottom:20px;border:1px solid var(--border);background:var(--surface);border-radius:6px}.route-share-quick strong{display:block;margin-bottom:8px;font-size:13px}.route-share-quick p{margin:8px 0 0}@media screen{.map-first-layout .route-share-quick{position:sticky;top:0;z-index:500;box-shadow:0 3px 10px #0002}.map-first-layout .route-share-quick .osmand-send{width:100%}}

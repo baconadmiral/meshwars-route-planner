@@ -37,6 +37,10 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
     if(url.pathname==='/api/drives/status')return reply({configured:false});
     if(url.pathname==='/api/radio-coverage')return reply({available:false,configured:false,events:[]});
     if(url.pathname.startsWith('/api/searches/')){if(route.request().method()==='POST')payload=route.request().postDataJSON();return reply({state:'complete',result:fixture});}
+    if(url.pathname==='/api/route-export'){
+     const coords=route.request().postDataJSON().route.geometry.coordinates;
+     return reply({gpx:'<gpx><trk><trkseg>'+coords.map(([lon,lat])=>`<trkpt lat="${lat}" lon="${lon}"/>`).join('')+'</trkseg></trk></gpx>'});
+    }
     const name=url.pathname==='/'?'index.html':url.pathname.slice(1);
     if(['index.html','app.js','search-client.js','startup.js','style.css'].includes(name))return route.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(root,'static',name))});
     return route.abort();
@@ -67,6 +71,16 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
    await page.locator('#submit').click();await page.waitForFunction(()=>!searching&&result?.mission_options);
    assert.equal(payload.mission_mode,'all');assert.deepEqual(payload.start,[.001,.001]);
    assert.equal(await page.locator('.card').count(),6);
+   if(width===390){
+    assert.equal(await page.locator('#map-divider').isVisible(),false);
+    const layout=await page.evaluate(()=>({pane:document.getElementById('route-pane').getBoundingClientRect(),map:document.getElementById('map').getBoundingClientRect(),overflow:getComputedStyle(document.getElementById('route-pane')).overflowY}));
+    assert.ok(layout.pane.height>600,'Mission options must expand rather than being squeezed into a split pane');
+    assert.ok(layout.pane.top>=layout.map.bottom,'Options must form a separate section below the map');
+    assert.equal(layout.overflow,'visible');
+    await page.locator('#mobile-show-routes').click();
+    assert.equal(await page.locator('#route-pane').evaluate(el=>el===document.activeElement),true);
+   }
+
    for(const choice of fixture.mission_options){
     const card=page.locator(`.card[data-mission="${choice.mode}"]`);
     assert.match(await card.innerText(),new RegExp(choice.name));
@@ -76,9 +90,11 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
    await page.evaluate(data=>{result=data;showRoute(0);},unavailable);
    assert.equal(await page.locator('.card[data-mission="special_ops"]').isDisabled(),true);
    assert.match(await page.locator('.card[data-mission="special_ops"]').innerText(),/No eligible place bonuses/);
-   await page.locator('#map-divider').focus();await page.keyboard.press('Home');
+   if(width>800){await page.locator('#map-divider').focus();await page.keyboard.press('Home');}
    await page.evaluate(()=>document.getElementById('route-pane').scrollTop=0);
+   await page.locator('#osmand-send:not([disabled])').waitFor();
    await page.locator('#route-pane').scrollIntoViewIfNeeded();
+   if(width===390)await page.evaluate(()=>window.scrollTo(0,document.getElementById('map').getBoundingClientRect().bottom+scrollY-150));
    fs.mkdirSync(path.join(__dirname,'test-results'),{recursive:true});
    await page.screenshot({path:path.join(__dirname,`test-results/mission-options-${width}.png`)});
    assert.deepEqual(errors,[]);
