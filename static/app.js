@@ -908,7 +908,8 @@ function bindOsmAndShare(button,status,route,team,prepared=null){
   button.disabled=true;
   try{
    // Do not fetch or await anything before calling share: iOS requires a tap.
-   const sharing=navigator.share({files:[ready.file],title:`MeshWars ${team} route`});
+   // WebKit can turn title into a second text item, hiding file-only import apps.
+   const sharing=navigator.share({files:[ready.file]});
    await sharing;if(status.isConnected)status.textContent='GPX passed to the share sheet. Complete the import in OsmAnd, then select the track for navigation.';
   }catch(error){if(status.isConnected)status.textContent=error.name==='AbortError'?'Sharing cancelled. Tap Send to OsmAnd to try again.':'File sharing could not start. Try again, or use Download GPX track under Navigate / send to phone.';}
   finally{if(button.isConnected)button.disabled=false;}
@@ -1111,7 +1112,7 @@ async function openNavigation(route){
   const shareFile=panel.querySelector('#gpx-share');
   if(navigator.share && navigator.canShare?.({files:[file]})){
    shareFile.hidden=false;
-   shareFile.onclick=async()=>{try{await navigator.share({files:[file],title:`MeshWars ${team} route`});}catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='File sharing unavailable. Download GPX and transfer it manually.';}};
+   shareFile.onclick=async()=>{try{await navigator.share({files:[file]});}catch(error){if(error.name!=='AbortError')panel.querySelector('#handoff-status').textContent='File sharing unavailable. Download GPX and transfer it manually.';}};
   }
   for(const [index,section] of data.sections.entries()){
    const card=document.createElement('section');card.className='navigation-section';
