@@ -93,7 +93,7 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC0lEQVR42mP8/x8AAw
     assert.ok(reconOrder.plannerTop>=reconOrder.workspaceBottom-1,'Planning must follow the recon workspace');
     assert.ok(reconOrder.mapTop<900-100,'The map must be visible on the initial screen');
     assert.equal(await page.locator('#find-capture-areas').innerText(),'Recon sweep');
-    await page.locator('.mobile-recon-heading button').click();
+    await page.locator('.mobile-recon-heading button[data-mobile-target="mission-planner"]').click();
     assert.equal(await page.locator('#mission-planner').evaluate(el=>el===document.activeElement),true);
     await page.locator('.mobile-recon-return').click();
     assert.equal(await page.locator('#recon-workspace').evaluate(el=>el===document.activeElement),true);

@@ -786,6 +786,7 @@ function showComparison(){
 function setPlanVisibility(visible){
  const workspace=document.querySelector('.workspace');
  $('route-pane').hidden=!visible;$('map-divider').hidden=!visible;
+ $('mobile-show-routes').hidden=!visible;
  workspace.classList.toggle('plan-hidden',!visible);
  workspace.dispatchEvent(new Event('routepanelchange'));
  if(map)map.invalidateSize({pan:false});
@@ -868,6 +869,52 @@ function drawRouteTargets(r){
   L.rectangle(bounds,{color:reinforcement.has(id)?'#d79d24':'#15966c',weight:2,dashArray:cell?null:'4 4',fillOpacity:cell?0:.18}).addTo(targets).bindTooltip(reinforcement.has(id)?`Friendly reinforcement · ${scoreLabel(cell)}`:cell?`Enemy target · ${escape(cell.owner_team)} · ${scoreLabel(cell)}`:'Unpainted exploration · coverage unknown');
  }
 }
+// Prepare before a tap so native sharing keeps the browser's transient activation.
+const routeExportCache=new WeakMap();
+function prepareRouteExport(route,team){
+ let entries=routeExportCache.get(route);if(!entries){entries=new Map();routeExportCache.set(route,entries);}
+ if(entries.has(team))return entries.get(team);
+ const task=(async()=>{
+  const response=await fetch('/api/route-export',{method:'POST',signal:AbortSignal.timeout(20000),headers:{'Content-Type':'application/json'},body:JSON.stringify({route:{team,geometry:route.geometry,via_points:route.via_points||[],stop_labels:route.stop_labels||[]}})});
+  const data=await response.json();if(!response.ok)throw Error(data.error||'Could not prepare the GPX track.');
+  if(typeof data.gpx!=='string'||!data.gpx)throw Error('The GPX export is unavailable.');return data;
+ })();
+ entries.set(team,task);task.catch(()=>{if(entries.get(team)===task)entries.delete(team);});return task;
+}
+function osmandShareFile(gpx,team){
+ const name=`${team.toLowerCase()}-route.gpx`;
+ const native=window.isSecureContext&&typeof navigator.share==='function'&&typeof navigator.canShare==='function';
+ for(const type of ['application/gpx+xml','application/xml','text/xml','application/octet-stream']){
+  const file=new File([gpx],name,{type});
+  try{if(native&&navigator.canShare({files:[file]}))return {file,native:true};}catch{}
+ }
+ return {file:new File([gpx],name,{type:'application/gpx+xml'}),native:false};
+}
+function bindOsmAndShare(button,status,route,team,prepared=null){
+ let ready=null;
+ function loaded(data){
+  ready=osmandShareFile(data.gpx,team);if(!button.isConnected)return;
+  button.disabled=false;button.removeAttribute('aria-busy');button.textContent=ready.native?'Send to OsmAnd':'Download GPX for OsmAnd';
+  status.textContent=ready.native?'Choose OsmAnd in the share sheet to import the full track. No manual download needed.':'This browser cannot share GPX files directly. Download the track, then open it in OsmAnd.';
+ }
+ async function prepare(){
+  button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Preparing GPX…';
+  try{loaded(await prepareRouteExport(route,team));}
+  catch(error){if(button.isConnected){status.textContent=error.message+' Tap to retry.';button.textContent='Retry GPX preparation';button.disabled=false;button.removeAttribute('aria-busy');}}
+ }
+ button.onclick=async()=>{
+  if(!ready){await prepare();return;}
+  if(!ready.native){saveFile(ready.file,ready.file.name);status.textContent='GPX downloaded. Open it with OsmAnd to import the track.';return;}
+  button.disabled=true;
+  try{
+   // Do not fetch or await anything before calling share: iOS requires a tap.
+   const sharing=navigator.share({files:[ready.file],title:`MeshWars ${team} route`});
+   await sharing;if(status.isConnected)status.textContent='GPX passed to the share sheet. Complete the import in OsmAnd, then select the track for navigation.';
+  }catch(error){if(status.isConnected)status.textContent=error.name==='AbortError'?'Sharing cancelled. Tap Send to OsmAnd to try again.':'File sharing could not start. Try again, or use Download GPX track under Navigate / send to phone.';}
+  finally{if(button.isConnected)button.disabled=false;}
+ };
+ if(prepared)loaded(prepared);else void prepare();
+}
 function showRoute(index){
  routeIndex=index;
  const r=result.routes[index], base=result.mission_baselines?.[r.mission_mode]||result.baseline;
@@ -894,7 +941,7 @@ function showRoute(index){
   if(step.maneuver.type==='arrive')text=legIndex===r.legs.length-1?'Arrive at Finish':`Reach ${r.stop_labels?.[legIndex]||'exploration detour'}; continue to the next leg`;
   steps.push(`<li><span>${escape(text)}</span><small>${miles(step.distance)}</small></li>`);
  }));
- $('results').innerHTML=`<div class="cards">${cards}</div>${result.mission_options?'<p class="fine mission-comparison-note">Each mission uses different priority weights. Compare driving time and objectives rather than priority numbers across modes. Different missions may choose the same roads.</p>':''}<div class="routehead"><h2>Route briefing</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-modal" aria-haspopup="dialog">Navigate / send to phone</button><button id="download">GeoJSON</button><button id="clear-displayed-route" type="button">Clear route</button></div></div>${activeMission?`<p class="mission-brief"><strong>${escape(activeMission.name)}</strong> · ${escape(activeMission.description)}</p>`:''}<p class="trip">Start: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → Finish: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value${r.mission_mode&&r.mission_mode!=='balanced'?'':r.place_bonus?`<br>${utility(r.territory_value)} territory priority + ${utility(r.place_bonus)} estimated place points × ${result.places?.weight??1}`:''}<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p>${routeValueDetails(r)}${routeCoverageDetails(r)}${placeBonusDetails(r)}<ol class="steps">${steps.join('')}</ol>`;
+ $('results').innerHTML=`<h2 class="route-options-title">${result.mission_options?'Mission options':'Route options'}</h2><section class="route-share-quick" aria-label="Selected route handoff"><strong>${escape(activeMission?.name||'Selected route')}</strong><button id="osmand-send" type="button" class="osmand-send" aria-describedby="osmand-send-status" disabled>Preparing GPX…</button><p id="osmand-send-status" class="fine" role="status" aria-live="polite"></p></section><div class="cards">${cards}</div>${result.mission_options?'<p class="fine mission-comparison-note">Each mission uses different priority weights. Compare driving time and objectives rather than priority numbers across modes. Different missions may choose the same roads.</p>':''}<div class="routehead"><h2>Route briefing</h2><div class="route-actions"><button id="phone-navigation" aria-expanded="false" aria-controls="navigation-modal" aria-haspopup="dialog">Navigate / send to phone</button><button id="download">GeoJSON</button><button id="clear-displayed-route" type="button">Clear route</button></div></div>${activeMission?`<p class="mission-brief"><strong>${escape(activeMission.name)}</strong> · ${escape(activeMission.description)}</p>`:''}<p class="trip">Start: ${escape(tripLabels?.start||$('start').value)}${(tripLabels?.waypoints||[]).map((label,index)=>` → W${index+1}: ${escape(label)}`).join('')} → Finish: ${escape(tripLabels?.end||$('end').value)}<br>${minutes(r.duration)} · ${miles(r.distance)} · ${utility(r.capture_value)} weighted value${r.mission_mode&&r.mission_mode!=='balanced'?'':r.place_bonus?`<br>${utility(r.territory_value)} territory priority + ${utility(r.place_bonus)} estimated place points × ${result.places?.weight??1}`:''}<br>${r.easy_enemy_count} easy enemy · ${r.hard_enemy_count} defended enemy · ${r.unknown_score_count} unknown score<br>${r.enemy_count} enemy + ${r.unmapped_count} unpainted / ${r.square_count} squares crossed<br>Fastest baseline: ${minutes(base.duration)} · ${miles(base.distance)} · ${base.target_count} target squares · ${utility(base.capture_value)} weighted value</p>${routeValueDetails(r)}${routeCoverageDetails(r)}${placeBonusDetails(r)}<ol class="steps">${steps.join('')}</ol>`;
  document.querySelectorAll('[data-route]').forEach(el=>el.onclick=()=>showRoute(Number(el.dataset.route)));
  document.querySelectorAll('[data-used-place]').forEach(button=>button.onclick=()=>{
   const place=r.bonus_places.find(place=>place.id===Number(button.dataset.usedPlace));
@@ -904,6 +951,7 @@ function showRoute(index){
   if(searching)return;
   clearDisplayedRoute();$('status').textContent='Route cleared. Your trip inputs and area are ready for another search.';
  };
+ bindOsmAndShare($('osmand-send'),$('osmand-send-status'),r,result.team);
  $('phone-navigation').onclick=()=>openNavigation(r);
  $('download').onclick=()=>{
   const blob=new Blob([JSON.stringify({type:'Feature',geometry:r.geometry,properties:{team:result.team,mission_mode:r.mission_mode||result.mission_mode,mission:missionModes[r.mission_mode]||result.mission,mission_breakdown:r.mission_breakdown,reinforcement_count:r.reinforcement_count,place_bonus:r.place_bonus,bonus_places:r.bonus_places,territory_value:r.territory_value,allowed_bounds:result.allowed_bounds,blocked_roads:result.blocked_roads,radio_coverage:r.radio_coverage,duration_seconds:r.duration,target_count:r.target_count,capture_value:r.capture_value,easy_enemy_count:r.easy_enemy_count,hard_enemy_count:r.hard_enemy_count,required_waypoints:result.required_waypoints}},null,2)],{type:'application/geo+json'});
@@ -998,11 +1046,11 @@ async function openNavigation(route){
  button.disabled=true;button.setAttribute('aria-expanded','true');
  panel.textContent='Preparing navigation links and GPX track…';
  try{
-  const response=await fetch('/api/route-export',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({route:{team:team,geometry:route.geometry,via_points:route.via_points||[],stop_labels:route.stop_labels||[]}})});
-  const data=await response.json();if(!response.ok)throw Error(data.error||'Export failed.');
+  const data=await prepareRouteExport(route,team);
   // A route switch may have removed this panel while export was being prepared.
   if(!panel.isConnected)return;
-  panel.innerHTML=`<div class="handoff-tabs" role="group" aria-label="Phone handoff view"><button id="handoff-show-preview" type="button" aria-pressed="true" aria-controls="handoff-preview-pane">Route preview</button><button id="handoff-show-qr" type="button" aria-pressed="false" aria-controls="handoff-qr-pane">QR &amp; sharing</button></div><section id="handoff-preview-pane"><h3>Planned route &amp; exported stops</h3><p>${data.preview.intermediate_stop_count} intermediate stops · ${data.sections.length} QR ${data.sections.length===1?'code':'codes'} · up to ${data.preview.waypoint_limit} intermediate stops per app link.</p><div class="handoff-preview-map" aria-label="Planned route with numbered Google Maps export stops"></div><div class="handoff-preview-key"><span>Solid: planned route</span><span>Amber dashes: gaps over 2 km</span><button class="handoff-fit-route" type="button">Fit whole route</button></div><p class="fine">Numbered pins are the coordinates sent to Google Maps, in order. Select a gap below to inspect it. Amber marks longer distances between stops, where Google has more room to choose different roads; shorter gaps can change too. This shows our planned geometry, not a route returned by Google. Stops may snap to nearby streets.</p><ol class="handoff-gap-list" aria-label="Distances between exported stops"></ol></section><div id="handoff-qr-pane" hidden><p>${data.sections.length===1?'Scan this QR code to open the complete drive in the Google Maps app on Android or iPhone.':'This drive exceeds nine intermediate stops, so it uses multiple Google Maps app links. Scan or copy/share all section links before leaving, then open them in order.'} No email or access to this local app is needed. If the link opens in a mobile browser, open it in the Google Maps app to retain all stops.</p><div id="navigation-sections"></div><p class="handoff-note">Google Maps recalculates roads between the stops and may skip capture streets. ${result.allowed_bounds||result.blocked_roads?.length?'It can also recalculate outside your drawn route area or onto roads you marked blocked. ':''}Check its preview before starting. GPX preserves the complete planned track for a compatible track-following app; it does not contain spoken instructions.</p><div class="route-actions"><button id="navigation-copy-all">Copy all navigation links</button><button id="navigation-share-all" hidden>Share all links</button></div><div class="route-actions handoff-file-actions"><button id="gpx-download">Download GPX track</button><button id="gpx-share" hidden>Share GPX file</button></div><p class="fine">Transfer the GPX file using AirDrop, Quick Share, your files/cloud app, or email. Import it in a navigation app that supports following GPX tracks. ${data.trackpoint_count.toLocaleString()} track points retained.</p><section class="gpx-qr-card"><h3>GPX for OsmAnd</h3><p>Scan a download link on your phone, then use Share → OsmAnd to import the full track. Your phone must be able to reach this site; this is a file download, not one-tap navigation.</p><button id="gpx-create-qr" type="button">Create GPX download QR</button><p id="gpx-qr-status" class="fine" role="status" aria-live="polite"></p><div id="gpx-qr-result" hidden><div class="navigation-qr gpx-download-qr"></div><div class="route-actions"><a id="gpx-qr-open" class="navigation-open" target="_blank" rel="noopener noreferrer">Download GPX</a><button id="gpx-qr-copy" type="button">Copy GPX link</button><button id="gpx-qr-share" type="button" hidden>Share GPX link</button></div><input id="gpx-qr-url" class="navigation-url" readonly aria-label="Temporary GPX download link"></div></section><p id="handoff-status" role="status" aria-live="polite"></p></div>`;
+  panel.innerHTML=`<section class="osmand-handoff"><h3>Send full track to OsmAnd</h3><button id="gpx-send-osmand" type="button" class="osmand-send" aria-describedby="osmand-handoff-status">Send to OsmAnd</button><p id="osmand-handoff-status" class="fine" role="status" aria-live="polite"></p></section><div class="handoff-tabs" role="group" aria-label="Phone handoff view"><button id="handoff-show-preview" type="button" aria-pressed="true" aria-controls="handoff-preview-pane">Route preview</button><button id="handoff-show-qr" type="button" aria-pressed="false" aria-controls="handoff-qr-pane">QR &amp; sharing</button></div><section id="handoff-preview-pane"><h3>Planned route &amp; exported stops</h3><p>${data.preview.intermediate_stop_count} intermediate stops · ${data.sections.length} QR ${data.sections.length===1?'code':'codes'} · up to ${data.preview.waypoint_limit} intermediate stops per app link.</p><div class="handoff-preview-map" aria-label="Planned route with numbered Google Maps export stops"></div><div class="handoff-preview-key"><span>Solid: planned route</span><span>Amber dashes: gaps over 2 km</span><button class="handoff-fit-route" type="button">Fit whole route</button></div><p class="fine">Numbered pins are the coordinates sent to Google Maps, in order. Select a gap below to inspect it. Amber marks longer distances between stops, where Google has more room to choose different roads; shorter gaps can change too. This shows our planned geometry, not a route returned by Google. Stops may snap to nearby streets.</p><ol class="handoff-gap-list" aria-label="Distances between exported stops"></ol></section><div id="handoff-qr-pane" hidden><p>${data.sections.length===1?'Scan this QR code to open the complete drive in the Google Maps app on Android or iPhone.':'This drive exceeds nine intermediate stops, so it uses multiple Google Maps app links. Scan or copy/share all section links before leaving, then open them in order.'} No email or access to this local app is needed. If the link opens in a mobile browser, open it in the Google Maps app to retain all stops.</p><div id="navigation-sections"></div><p class="handoff-note">Google Maps recalculates roads between the stops and may skip capture streets. ${result.allowed_bounds||result.blocked_roads?.length?'It can also recalculate outside your drawn route area or onto roads you marked blocked. ':''}Check its preview before starting. GPX preserves the complete planned track for a compatible track-following app; it does not contain spoken instructions.</p><div class="route-actions"><button id="navigation-copy-all">Copy all navigation links</button><button id="navigation-share-all" hidden>Share all links</button></div><div class="route-actions handoff-file-actions"><button id="gpx-download">Download GPX track</button><button id="gpx-share" hidden>Share GPX file</button></div><p class="fine">Transfer the GPX file using AirDrop, Quick Share, your files/cloud app, or email. Import it in a navigation app that supports following GPX tracks. ${data.trackpoint_count.toLocaleString()} track points retained.</p><section class="gpx-qr-card"><h3>GPX for OsmAnd</h3><p>Scan a download link on your phone, then use Share → OsmAnd to import the full track. Your phone must be able to reach this site; this is a file download, not one-tap navigation.</p><button id="gpx-create-qr" type="button">Create GPX download QR</button><p id="gpx-qr-status" class="fine" role="status" aria-live="polite"></p><div id="gpx-qr-result" hidden><div class="navigation-qr gpx-download-qr"></div><div class="route-actions"><a id="gpx-qr-open" class="navigation-open" target="_blank" rel="noopener noreferrer">Download GPX</a><button id="gpx-qr-copy" type="button">Copy GPX link</button><button id="gpx-qr-share" type="button" hidden>Share GPX link</button></div><input id="gpx-qr-url" class="navigation-url" readonly aria-label="Temporary GPX download link"></div></section><p id="handoff-status" role="status" aria-live="polite"></p></div>`;
+  bindOsmAndShare(panel.querySelector('#gpx-send-osmand'),panel.querySelector('#osmand-handoff-status'),route,team,data);
   try{handoffPreview=drawHandoffPreview(panel.querySelector('#handoff-preview-pane'),data,route,team,routeArea);}
   catch{panel.querySelector('#handoff-preview-pane').textContent='The map preview could not load. Your QR codes, links, and GPX export remain available under QR & sharing.';}
   const showHandoffPane=showPreview=>{
@@ -1096,6 +1144,7 @@ function initPanelResize(){
   frame=requestAnimationFrame(()=>{frame=null;if(map)map.invalidateSize({pan:false});});
  }
  function apply(height,save=false){
+  if(document.documentElement.classList.contains('map-first-layout')){redrawMap();return;}
   if($('route-pane').hidden){redrawMap();return;}
   const b=bounds();
   if(!b.available)return;
@@ -1942,7 +1991,7 @@ async function planTrip(resuming=null){
  }finally{
   if(timer)clearInterval(timer);
   searchController=null;setSearching(false);planningRoute=false;
-  if(completed&&mobileSearch.matches)document.querySelector('.workspace').scrollIntoView({block:'start',behavior:'auto'});
+  if(completed&&document.documentElement.classList.contains('map-first-layout'))$('route-pane').scrollIntoView({block:'start',behavior:'auto'});
   if(invalidStop){revealSidebarControl($(invalidStop));$(invalidStop)?.focus();}
   else if(failed){revealSidebarControl($('route-input-error'));$('route-input-error').focus();$('route-input-error').scrollIntoView({block:'center',behavior:'auto'});}
  }
