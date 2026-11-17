@@ -1252,25 +1252,14 @@ async function refreshPlayers(){
  renderPlayerFilter();
 }
 const debriefVisitKey='meshwars-last-map-visit-v1';
-const debriefFields=['tiles','explorer_points','checkin_points','total'];
-function debriefScoreRecord(value){
- if(!value||!Number.isFinite(value.at)||value.at<=0||value.at>Date.now()/1000||!Array.isArray(value.teams)||value.teams.length!==Object.keys(colors).length)return null;
- const seen=new Set();
- for(const row of value.teams){if(!Object.hasOwn(colors,row.team)||seen.has(row.team)||debriefFields.some(field=>!Number.isFinite(row[field])||row[field]<0))return null;seen.add(row.team);}
- return {at:value.at,season_id:value.season_id??null,teams:value.teams.map(row=>Object.fromEntries(['team',...debriefFields].map(key=>[key,row[key]])))};
-}
 function readDebriefVisit(){
- try{const value=JSON.parse(localStorage.getItem(debriefVisitKey)||'null');if(value&&Number.isFinite(value.seen_at)&&value.seen_at>0&&value.seen_at<=Date.now()/1000)return {...value,score:debriefScoreRecord(value.score)};}catch{}
+ try{const value=JSON.parse(localStorage.getItem(debriefVisitKey)||'null');if(value&&Number.isFinite(value.seen_at)&&value.seen_at>0&&value.seen_at<=Date.now()/1000)return {seen_at:value.seen_at};}catch{}
  return null;
 }
 let previousDebriefVisit=readDebriefVisit();
-function currentDebriefScore(){
- const data=feedMetadata?.team_scores;if(!data?.available)return null;
- return debriefScoreRecord({at:data.last_success||Date.now()/1000,season_id:data.season_id,teams:data.teams});
-}
 function recordDebriefVisit(force=false){
  if(!boardAvailable||(!force&&document.visibilityState==='hidden'))return;
- try{localStorage.setItem(debriefVisitKey,JSON.stringify({seen_at:Date.now()/1000,score:currentDebriefScore()}));}catch{}
+ try{localStorage.setItem(debriefVisitKey,JSON.stringify({seen_at:Date.now()/1000}));}catch{}
 }
 document.addEventListener('visibilitychange',()=>{
  if(document.visibilityState==='hidden')recordDebriefVisit(true);
@@ -1280,39 +1269,26 @@ const debriefTour={active:false,steps:[],index:0,layer:null,renderer:null,view:n
 function buildDebrief(period,now=Date.now()/1000){
  const cap=captureWindowStart(now,3),visit=period==='visit'&&previousDebriefVisit;
  const start=visit?Math.max(cap,previousDebriefVisit.seen_at):captureWindowStart(now,Number(period)||1);
- const current=currentDebriefScore();
- const sameSeason=record=>current&&JSON.stringify(record.season_id)===JSON.stringify(current.season_id);
- const history=(feedMetadata?.team_scores?.history||[]).map(debriefScoreRecord).filter(row=>row&&sameSeason(row)&&row.at<=current.at).sort((a,b)=>a.at-b.at);
- let baseline=null;
- if(visit&&previousDebriefVisit.seen_at>=cap&&previousDebriefVisit.score&&sameSeason(previousDebriefVisit.score)&&previousDebriefVisit.score.at<=current.at)baseline=previousDebriefVisit.score;
- if(!baseline){baseline=history.filter(row=>row.at<=start).at(-1)||history.find(row=>row.at<current.at)||null;}
- if(current&&current.at<start)baseline=null;
- const scoreMap=new Map(current?.teams.map(row=>[row.team,row])||[]),baseMap=new Map(baseline?.teams.map(row=>[row.team,row])||[]);
  const captures=board.filter(cell=>Object.hasOwn(colors,cell.owner_team)&&Number.isFinite(cell.captured_at)&&cell.captured_at>=start&&cell.captured_at<=now).map(cell=>({...cell}));
  const rows=Object.keys(colors).map(team=>{
-  const a=scoreMap.get(team),b=baseMap.get(team),cells=captures.filter(cell=>cell.owner_team===team);
-  const delta=a&&b?Object.fromEntries(debriefFields.map(field=>[field,a[field]-b[field]])):null;
-  return {team,delta,cells,areas:rankCaptureAreas(cells)};
- }).sort((a,b)=>Math.abs(b.delta?.total||0)-Math.abs(a.delta?.total||0)||b.cells.length-a.cells.length||a.team.localeCompare(b.team));
+  const cells=captures.filter(cell=>cell.owner_team===team);
+  return {team,cells,areas:rankCaptureAreas(cells)};
+ }).sort((a,b)=>b.cells.length-a.cells.length||a.team.localeCompare(b.team));
  const steps=rows.flatMap(row=>{
   const byId=new Map(row.cells.map(cell=>[cell.cell_id,cell]));
-  if(row.areas.length)return row.areas.map((area,index)=>({...area,team:row.team,area:index+1,area_total:row.areas.length,cells:area.cell_ids.map(id=>byId.get(id)).filter(Boolean),delta:row.delta}));
-  return row.delta&&debriefFields.some(field=>row.delta[field]!==0)?[{team:row.team,delta:row.delta,count:0,cells:[]}]:[];
+  return row.areas.map((area,index)=>({...area,team:row.team,area:index+1,area_total:row.areas.length,cells:area.cell_ids.map(id=>byId.get(id)).filter(Boolean)}));
  });
  const label=visit?'Since last visit':Number(period)===2?'Yesterday + today':Number(period)===3?'Last 3 days':'Today';
  const range=`${label} · ${new Date(start*1000).toLocaleString()} onward · ${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
- let note=baseline&&current?`Recorded score changes: ${new Date(baseline.at*1000).toLocaleString()} → ${new Date(current.at*1000).toLocaleString()}.`:'Earlier recorded scores are unavailable; score changes are unknown. Recent captures can still be reviewed.';
- if(current&&current.at<start)note='Latest recorded scores predate this period; score changes are unknown.';
- if(baseline&&baseline.at>start)note+=' Partial score history: recording started after this period began.';
+ let note='Recent captures currently held on the loaded board.';
  if(visit&&previousDebriefVisit.seen_at<cap)note+=' Last visit was earlier; review is limited to 3 calendar days.';
- if(feedMetadata?.stale||feedMetadata?.team_scores?.stale)note+=' Using cached data.';
+ if(feedMetadata?.stale)note+=' Using cached data.';
  return {rows,steps,start,label,range,note};
 }
-function debriefDelta(value){return value===null||value===undefined?'Unknown':`${value>0?'+':''}${utility(value)}`;}
 function renderDebrief(){
  const summary=buildDebrief($('debrief-period').value);debriefTour.summary=summary;
  $('debrief-history-note').textContent=summary.range+'. '+summary.note;
- $('debrief-team-list').innerHTML=summary.rows.map(row=>`<li><strong style="color:${colors[row.team]}">${row.team}</strong><b>${row.delta?`${debriefDelta(row.delta.total)} total pts`:'Score change unknown'}</b><p>${row.delta?`Territory ${debriefDelta(row.delta.tiles)} · Explorer ${debriefDelta(row.delta.explorer_points)} · Check-in ${debriefDelta(row.delta.checkin_points)}`:'Needs an earlier recorded score snapshot.'}</p><small>${row.cells.length.toLocaleString()} recent captures currently held · ${row.areas.length} areas</small></li>`).join('');
+ $('debrief-team-list').innerHTML=summary.rows.map(row=>`<li><strong style="color:${colors[row.team]}">${row.team}</strong><b>${row.cells.length.toLocaleString()} recent captures currently held</b><small>${row.areas.length} capture areas</small></li>`).join('');
  $('debrief-start').disabled=!map||!summary.steps.length;
 }
 $('open-debrief').onclick=()=>{
@@ -1331,10 +1307,9 @@ $('debrief-start').onclick=()=>{
 function showDebriefStep(){
  const step=debriefTour.steps[debriefTour.index];if(!step)return;
  const panel=$('debrief-tour');panel.hidden=false;panel.style.setProperty('--debrief-team-color',colors[step.team]);
- $('debrief-tour-title').textContent=`${step.team}${step.area?` · Area ${step.area}/${step.area_total}`:' · Score change'}`;
+ $('debrief-tour-title').textContent=`${step.team} · Area ${step.area}/${step.area_total}`;
  $('debrief-tour-progress').textContent=`${debriefTour.summary.label} · Step ${debriefTour.index+1} of ${debriefTour.steps.length}`;
- $('debrief-tour-score').textContent=step.delta?`Total ${debriefDelta(step.delta.total)} · Territory ${debriefDelta(step.delta.tiles)} · Explorer ${debriefDelta(step.delta.explorer_points)} · Check-in ${debriefDelta(step.delta.checkin_points)}`:'Score changes unknown; earlier scores were not recorded.';
- $('debrief-tour-captures').textContent=step.cells.length?`${step.count.toLocaleString()} recent captures currently held. Temporary highlights; map filters unchanged.`:'No matching capture area is recorded for this score change. Explorer/check-in visits are not geolocated.';
+ $('debrief-tour-captures').textContent=`${step.count.toLocaleString()} recent captures currently held. Temporary highlights; map filters unchanged.`;
  $('debrief-previous').disabled=debriefTour.index===0;$('debrief-next').textContent=debriefTour.index===debriefTour.steps.length-1?'Finish':'Next';
  debriefTour.layer.clearLayers();
  if(step.bounds){
@@ -1358,7 +1333,7 @@ function initDebriefControl(){
  map.createPane('debrief-captures').style.zIndex='480';debriefTour.renderer=L.svg({pane:'debrief-captures'});debriefTour.layer=L.layerGroup().addTo(map);
  const control=L.control({position:'bottomright'});control.onAdd=()=>{
   const panel=L.DomUtil.create('section','debrief-tour');panel.id='debrief-tour';panel.hidden=true;panel.setAttribute('aria-label','Team debrief walkthrough');
-  panel.innerHTML='<strong id="debrief-tour-title"></strong><small id="debrief-tour-progress" role="status" aria-live="polite"></small><p id="debrief-tour-score"></p><p id="debrief-tour-captures"></p><div><button id="debrief-previous" type="button">Previous</button><button id="debrief-next" type="button">Next</button><button id="debrief-end" type="button">End</button></div>';
+  panel.innerHTML='<strong id="debrief-tour-title"></strong><small id="debrief-tour-progress" role="status" aria-live="polite"></small><p id="debrief-tour-captures"></p><div><button id="debrief-previous" type="button">Previous</button><button id="debrief-next" type="button">Next</button><button id="debrief-end" type="button">End</button></div>';
   L.DomEvent.disableClickPropagation(panel);L.DomEvent.disableScrollPropagation(panel);
   panel.querySelector('#debrief-previous').onclick=()=>{if(debriefTour.index>0){debriefTour.index--;showDebriefStep();}};
   panel.querySelector('#debrief-next').onclick=()=>{if(debriefTour.index===debriefTour.steps.length-1)endDebrief();else{debriefTour.index++;showDebriefStep();}};
