@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
-from team_scores import TeamScores, validate_scores
+from team_scores import TeamScores, validate_scores, score_history
 from teams import TEAMS
 
 
@@ -52,3 +52,31 @@ class TeamScoreTests(unittest.TestCase):
                 feed.refresh()
             self.assertEqual(len(feed.snapshot()['teams']),7)
             self.assertTrue(feed.snapshot()['stale'])
+
+    def test_recorded_history_persists_real_changes_and_preserves_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'scores.json';feed=TeamScores(path)
+            first=payload();second=payload();second['teams'][0]['total']+=5;second['teams'][0]['explorer_points']+=5
+            for at,data in [(1000000,first),(1001800,second)]:
+                with patch('team_scores.time.time',return_value=at),patch('team_scores.urlopen',return_value=io.BytesIO(json.dumps(data).encode())):feed.refresh()
+            self.assertEqual([r['teams'][0]['total'] for r in feed.snapshot()['history']],[30.5,35.5])
+            with patch('team_scores.time.time',return_value=1001900):restored=TeamScores(path)
+            self.assertEqual(restored.snapshot()['history'],feed.snapshot()['history'])
+            snapshot=restored.snapshot();snapshot['history'][0]['teams'][0]['total']=999
+            self.assertEqual(restored.snapshot()['history'][0]['teams'][0]['total'],30.5)
+            with patch('team_scores.urlopen',side_effect=URLError('offline')):restored.refresh()
+            self.assertEqual(len(restored.snapshot()['history']),2)
+
+    def test_history_prunes_old_rows_bounds_size_and_separates_seasons(self):
+        now=1000000
+        rows=[dict(payload(),at=now-6*86400),dict(payload(),at=now-5*86400),dict(payload(),at=now-2*86400),dict(payload(),at=now)]
+        self.assertEqual(len(score_history(rows,now,3)),3)
+        self.assertEqual(score_history(rows,now,4),[])
+        self.assertEqual(len(score_history([dict(payload(),at=now-i) for i in range(700)],now,3)),512)
+        self.assertEqual(score_history([dict(payload(),at=float('nan')),dict(payload(),at=now+1),{}],now,3),[])
+
+    def test_legacy_cache_becomes_a_real_history_anchor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'scores.json';path.write_text(json.dumps({'data':payload(),'last_success':1000000}))
+            with patch('team_scores.time.time',return_value=1000100):feed=TeamScores(path)
+            self.assertEqual(feed.snapshot()['history'][0]['at'],1000000)

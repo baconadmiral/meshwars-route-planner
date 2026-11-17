@@ -256,3 +256,11 @@ body.search-modal-open{overflow:hidden}
 }
 
 .route-share-quick{padding:14px;margin-bottom:20px;border:1px solid var(--border);background:var(--surface);border-radius:6px}.route-share-quick strong{display:block;margin-bottom:8px;font-size:13px}.route-share-quick p{margin:8px 0 0}@media screen{.map-first-layout .route-share-quick{position:sticky;top:0;z-index:500;box-shadow:0 3px 10px #0002}.map-first-layout .route-share-quick .osmand-send{width:100%}}
+
+#sidebar-data[hidden]{display:none}.team-score-controls{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}#team-scoreboard #refresh-board{min-height:44px;padding:7px 9px;font-size:11px}.team-scores-label #score-refresh-status{font-size:10px;line-height:1.4;max-width:175px}
+
+#team-scoreboard #open-debrief{min-height:44px;padding:7px 9px;font-size:11px}
+#debrief-dialog{width:min(650px,calc(100vw - 28px));max-height:85dvh;overflow:auto;padding:22px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text)}#debrief-dialog::backdrop{background:#0009}#debrief-dialog h2{margin-top:0}#debrief-team-list{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}#debrief-team-list li{border:1px solid var(--border);padding:12px;border-radius:5px;background:var(--field)}#debrief-team-list strong{display:block;font-size:12px;margin-bottom:5px}#debrief-team-list b{font-size:15px}#debrief-team-list p{font-size:11px;margin:6px 0;line-height:1.5}.debrief-dialog-actions{display:flex;gap:10px;position:sticky;bottom:-22px;padding:12px 0;background:var(--surface)}.debrief-dialog-actions button{min-height:44px}
+.debrief-tour{width:260px;max-width:calc(100vw - 92px);padding:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-top:4px solid var(--debrief-team-color);box-shadow:0 2px 10px #0004;border-radius:6px}.debrief-tour[hidden]{display:none}.debrief-tour strong{color:var(--debrief-team-color);font-size:14px}.debrief-tour p{font-size:11px;line-height:1.4;margin:8px 0}.debrief-tour>div{display:flex;gap:5px}.debrief-tour button{min-height:44px;font-size:11px;padding:7px;flex:1}
+
+.debrief-active .map-operations-label{visibility:hidden}

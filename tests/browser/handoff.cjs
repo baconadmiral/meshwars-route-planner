@@ -174,9 +174,10 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
     assert.equal(await page.locator('.square-refresh-outline').count(),0);
     assert.equal(await page.evaluate(()=>board[2].captured_by),'Older player');
     assert.match(await page.locator('.leaflet-popup-content').filter({hasText:'Older player'}).innerText(),/Verified TX reports: 4/);
-    await page.locator('[data-sidebar-target="sidebar-data"]').click();
-    assert.match(await page.locator('#mesh-evidence-counts').innerText(),/Verified TX evidence\s+1 squares/);
-    assert.match(await page.locator('#mesh-evidence-status').innerText(),/1 squares inspected/);
+    assert.equal(await page.locator('#sidebar-data').isVisible(),false);
+    assert.equal(await page.locator('[data-sidebar-target="sidebar-data"]').count(),0);
+    assert.match(await page.locator('#mesh-evidence-counts').textContent(),/Verified TX evidence\s*1 squares/);
+    assert.match(await page.locator('#mesh-evidence-status').textContent(),/1 squares inspected/);
     assert.equal(await page.evaluate(()=>squareEvidenceDetails({evidence_summary:{verified_tx_count:0,passive_rx_count:0,other_count:0,max_watcher_count:null}}).includes('Coverage unknown')),true);
     console.log('Passed MeshWars signal intel: square summary, inspected-square counts and zero evidence remains unknown.');
 
