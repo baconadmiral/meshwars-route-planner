@@ -348,10 +348,10 @@ try{
 function captureFilterLabel(){
  return captureDays===0?'All time':captureDays===1?'Today':captureDays===2?'Yesterday + today':`Last ${captureDays} days`;
 }
-function captureWindowStart(now=Date.now()/1000){
+function captureWindowStart(now=Date.now()/1000,days=captureDays){
  // Local date arithmetic preserves midnight across 23/25-hour DST days.
  const start=new Date(now*1000);start.setHours(0,0,0,0);
- start.setDate(start.getDate()-Math.max(0,captureDays-1));
+ start.setDate(start.getDate()-Math.max(0,days-1));
  return start.getTime()/1000;
 }
 let squareStyleFrame=null;
@@ -479,7 +479,7 @@ function rankCaptureAreas(cells){
    south=Math.min(south,cell.south);north=Math.max(north,cell.north);west=Math.min(west,cell.west+shift);east=Math.max(east,cell.east+shift);
    if(Number.isFinite(cell.captured_at)&&cell.captured_at<=Date.now()/1000)newest=Math.max(newest,cell.captured_at);
   }
-  return {count:group.length,newest,bounds:[[south,west],[north,east]],key:group.map(c=>String(c.cell_id)).sort()[0]};
+  return {count:group.length,newest,bounds:[[south,west],[north,east]],cell_ids:group.map(c=>c.cell_id),key:group.map(c=>String(c.cell_id)).sort()[0]};
  }).sort((a,b)=>b.count-a.count||b.newest-a.newest||a.key.localeCompare(b.key));
 }
 let captureAreas=[],captureAreaIndex=-1,captureAreaFingerprint=null;
@@ -1251,7 +1251,127 @@ async function refreshPlayers(){
  }catch{playerRoster={...(playerRoster||{}),stale:true,error:'Player roster unavailable; known capture names remain selectable.'};}
  renderPlayerFilter();
 }
+const debriefVisitKey='meshwars-last-map-visit-v1';
+const debriefFields=['tiles','explorer_points','checkin_points','total'];
+function debriefScoreRecord(value){
+ if(!value||!Number.isFinite(value.at)||value.at<=0||value.at>Date.now()/1000||!Array.isArray(value.teams)||value.teams.length!==Object.keys(colors).length)return null;
+ const seen=new Set();
+ for(const row of value.teams){if(!Object.hasOwn(colors,row.team)||seen.has(row.team)||debriefFields.some(field=>!Number.isFinite(row[field])||row[field]<0))return null;seen.add(row.team);}
+ return {at:value.at,season_id:value.season_id??null,teams:value.teams.map(row=>Object.fromEntries(['team',...debriefFields].map(key=>[key,row[key]])))};
+}
+function readDebriefVisit(){
+ try{const value=JSON.parse(localStorage.getItem(debriefVisitKey)||'null');if(value&&Number.isFinite(value.seen_at)&&value.seen_at>0&&value.seen_at<=Date.now()/1000)return {...value,score:debriefScoreRecord(value.score)};}catch{}
+ return null;
+}
+let previousDebriefVisit=readDebriefVisit();
+function currentDebriefScore(){
+ const data=feedMetadata?.team_scores;if(!data?.available)return null;
+ return debriefScoreRecord({at:data.last_success||Date.now()/1000,season_id:data.season_id,teams:data.teams});
+}
+function recordDebriefVisit(force=false){
+ if(!boardAvailable||(!force&&document.visibilityState==='hidden'))return;
+ try{localStorage.setItem(debriefVisitKey,JSON.stringify({seen_at:Date.now()/1000,score:currentDebriefScore()}));}catch{}
+}
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='hidden')recordDebriefVisit(true);
+ else{previousDebriefVisit=readDebriefVisit();recordDebriefVisit();}
+});
+const debriefTour={active:false,steps:[],index:0,layer:null,renderer:null,view:null,summary:null};
+function buildDebrief(period,now=Date.now()/1000){
+ const cap=captureWindowStart(now,3),visit=period==='visit'&&previousDebriefVisit;
+ const start=visit?Math.max(cap,previousDebriefVisit.seen_at):captureWindowStart(now,Number(period)||1);
+ const current=currentDebriefScore();
+ const sameSeason=record=>current&&JSON.stringify(record.season_id)===JSON.stringify(current.season_id);
+ const history=(feedMetadata?.team_scores?.history||[]).map(debriefScoreRecord).filter(row=>row&&sameSeason(row)&&row.at<=current.at).sort((a,b)=>a.at-b.at);
+ let baseline=null;
+ if(visit&&previousDebriefVisit.seen_at>=cap&&previousDebriefVisit.score&&sameSeason(previousDebriefVisit.score)&&previousDebriefVisit.score.at<=current.at)baseline=previousDebriefVisit.score;
+ if(!baseline){baseline=history.filter(row=>row.at<=start).at(-1)||history.find(row=>row.at<current.at)||null;}
+ if(current&&current.at<start)baseline=null;
+ const scoreMap=new Map(current?.teams.map(row=>[row.team,row])||[]),baseMap=new Map(baseline?.teams.map(row=>[row.team,row])||[]);
+ const captures=board.filter(cell=>Object.hasOwn(colors,cell.owner_team)&&Number.isFinite(cell.captured_at)&&cell.captured_at>=start&&cell.captured_at<=now).map(cell=>({...cell}));
+ const rows=Object.keys(colors).map(team=>{
+  const a=scoreMap.get(team),b=baseMap.get(team),cells=captures.filter(cell=>cell.owner_team===team);
+  const delta=a&&b?Object.fromEntries(debriefFields.map(field=>[field,a[field]-b[field]])):null;
+  return {team,delta,cells,areas:rankCaptureAreas(cells)};
+ }).sort((a,b)=>Math.abs(b.delta?.total||0)-Math.abs(a.delta?.total||0)||b.cells.length-a.cells.length||a.team.localeCompare(b.team));
+ const steps=rows.flatMap(row=>{
+  const byId=new Map(row.cells.map(cell=>[cell.cell_id,cell]));
+  if(row.areas.length)return row.areas.map((area,index)=>({...area,team:row.team,area:index+1,area_total:row.areas.length,cells:area.cell_ids.map(id=>byId.get(id)).filter(Boolean),delta:row.delta}));
+  return row.delta&&debriefFields.some(field=>row.delta[field]!==0)?[{team:row.team,delta:row.delta,count:0,cells:[]}]:[];
+ });
+ const label=visit?'Since last visit':Number(period)===2?'Yesterday + today':Number(period)===3?'Last 3 days':'Today';
+ const range=`${label} · ${new Date(start*1000).toLocaleString()} onward · ${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+ let note=baseline&&current?`Recorded score changes: ${new Date(baseline.at*1000).toLocaleString()} → ${new Date(current.at*1000).toLocaleString()}.`:'Earlier recorded scores are unavailable; score changes are unknown. Recent captures can still be reviewed.';
+ if(current&&current.at<start)note='Latest recorded scores predate this period; score changes are unknown.';
+ if(baseline&&baseline.at>start)note+=' Partial score history: recording started after this period began.';
+ if(visit&&previousDebriefVisit.seen_at<cap)note+=' Last visit was earlier; review is limited to 3 calendar days.';
+ if(feedMetadata?.stale||feedMetadata?.team_scores?.stale)note+=' Using cached data.';
+ return {rows,steps,start,label,range,note};
+}
+function debriefDelta(value){return value===null||value===undefined?'Unknown':`${value>0?'+':''}${utility(value)}`;}
+function renderDebrief(){
+ const summary=buildDebrief($('debrief-period').value);debriefTour.summary=summary;
+ $('debrief-history-note').textContent=summary.range+'. '+summary.note;
+ $('debrief-team-list').innerHTML=summary.rows.map(row=>`<li><strong style="color:${colors[row.team]}">${row.team}</strong><b>${row.delta?`${debriefDelta(row.delta.total)} total pts`:'Score change unknown'}</b><p>${row.delta?`Territory ${debriefDelta(row.delta.tiles)} · Explorer ${debriefDelta(row.delta.explorer_points)} · Check-in ${debriefDelta(row.delta.checkin_points)}`:'Needs an earlier recorded score snapshot.'}</p><small>${row.cells.length.toLocaleString()} recent captures currently held · ${row.areas.length} areas</small></li>`).join('');
+ $('debrief-start').disabled=!map||!summary.steps.length;
+}
+$('open-debrief').onclick=()=>{
+ if(debriefTour.active)endDebrief();
+ const visit=$('debrief-period').querySelector('[value="visit"]');visit.disabled=!previousDebriefVisit;
+ $('debrief-period').value=previousDebriefVisit?'visit':'1';renderDebrief();$('debrief-dialog').showModal();
+};
+$('debrief-period').onchange=renderDebrief;
+$('debrief-close').onclick=()=>{$('debrief-dialog').close();recordDebriefVisit();};
+$('debrief-start').onclick=()=>{
+ const summary=debriefTour.summary;if(!summary?.steps.length||!map)return;
+ cancelAreaDrawing();cancelBlockedRoadDrawing();setMapPickTarget(null);
+ debriefTour.view={center:map.getCenter(),zoom:map.getZoom()};debriefTour.active=true;document.documentElement.classList.add('debrief-active');debriefTour.steps=summary.steps;debriefTour.index=0;
+ $('debrief-dialog').close();showDebriefStep();
+};
+function showDebriefStep(){
+ const step=debriefTour.steps[debriefTour.index];if(!step)return;
+ const panel=$('debrief-tour');panel.hidden=false;panel.style.setProperty('--debrief-team-color',colors[step.team]);
+ $('debrief-tour-title').textContent=`${step.team}${step.area?` · Area ${step.area}/${step.area_total}`:' · Score change'}`;
+ $('debrief-tour-progress').textContent=`${debriefTour.summary.label} · Step ${debriefTour.index+1} of ${debriefTour.steps.length}`;
+ $('debrief-tour-score').textContent=step.delta?`Total ${debriefDelta(step.delta.total)} · Territory ${debriefDelta(step.delta.tiles)} · Explorer ${debriefDelta(step.delta.explorer_points)} · Check-in ${debriefDelta(step.delta.checkin_points)}`:'Score changes unknown; earlier scores were not recorded.';
+ $('debrief-tour-captures').textContent=step.cells.length?`${step.count.toLocaleString()} recent captures currently held. Temporary highlights; map filters unchanged.`:'No matching capture area is recorded for this score change. Explorer/check-in visits are not geolocated.';
+ $('debrief-previous').disabled=debriefTour.index===0;$('debrief-next').textContent=debriefTour.index===debriefTour.steps.length-1?'Finish':'Next';
+ debriefTour.layer.clearLayers();
+ if(step.bounds){
+  fitCaptureBounds(step.bounds);
+  const panelHeight=panel.getBoundingClientRect().height;
+  map.fitBounds(step.bounds,{paddingTopLeft:[32,24],paddingBottomRight:[32,Math.min(panelHeight+32,map.getSize().y*.6)],maxZoom:14,animate:false});
+  if(step.cells.length>2500){L.rectangle(step.bounds,{color:colors[step.team],weight:4,fillOpacity:.08,interactive:false,renderer:debriefTour.renderer}).addTo(debriefTour.layer);}
+  else for(const cell of step.cells){
+   const center=(step.bounds[0][1]+step.bounds[1][1])/2,shift=Math.round((center-(cell.west+cell.east)/2)/360)*360;
+   L.rectangle([[cell.south,cell.west+shift],[cell.north,cell.east+shift]],{color:colors[step.team],weight:3,fillColor:colors[step.team],fillOpacity:.5,interactive:false,renderer:debriefTour.renderer}).addTo(debriefTour.layer);
+  }
+ }else $('map').scrollIntoView({block:'start',behavior:'auto'});
+}
+function endDebrief(restore=true){
+ if(!debriefTour.active)return;
+ debriefTour.active=false;document.documentElement.classList.remove('debrief-active');debriefTour.layer?.clearLayers();if($('debrief-tour'))$('debrief-tour').hidden=true;
+ if(restore&&debriefTour.view)map.setView(debriefTour.view.center,debriefTour.view.zoom,{animate:false});
+ debriefTour.steps=[];debriefTour.view=null;recordDebriefVisit();
+}
+function initDebriefControl(){
+ map.createPane('debrief-captures').style.zIndex='480';debriefTour.renderer=L.svg({pane:'debrief-captures'});debriefTour.layer=L.layerGroup().addTo(map);
+ const control=L.control({position:'bottomright'});control.onAdd=()=>{
+  const panel=L.DomUtil.create('section','debrief-tour');panel.id='debrief-tour';panel.hidden=true;panel.setAttribute('aria-label','Team debrief walkthrough');
+  panel.innerHTML='<strong id="debrief-tour-title"></strong><small id="debrief-tour-progress" role="status" aria-live="polite"></small><p id="debrief-tour-score"></p><p id="debrief-tour-captures"></p><div><button id="debrief-previous" type="button">Previous</button><button id="debrief-next" type="button">Next</button><button id="debrief-end" type="button">End</button></div>';
+  L.DomEvent.disableClickPropagation(panel);L.DomEvent.disableScrollPropagation(panel);
+  panel.querySelector('#debrief-previous').onclick=()=>{if(debriefTour.index>0){debriefTour.index--;showDebriefStep();}};
+  panel.querySelector('#debrief-next').onclick=()=>{if(debriefTour.index===debriefTour.steps.length-1)endDebrief();else{debriefTour.index++;showDebriefStep();}};
+  panel.querySelector('#debrief-end').onclick=()=>endDebrief();return panel;
+ };control.addTo(map);
+}
+function showBoardFeedMessage(message){
+ $('board-feed-status').textContent=message;
+ const status=$('score-refresh-status');status.hidden=false;status.textContent=message;
+ $('refresh-board').title=message;
+}
 function renderFeedStatus(){
+ recordDebriefVisit();
  renderTeamScores();renderPlayerFilter();renderMeshEvidence();
  if(!feedMetadata)return;
  const meta=feedMetadata;
@@ -1259,6 +1379,8 @@ function renderFeedStatus(){
  const state=meta.refreshing?'Refreshing MeshWars…':meta.stale?'Using fallback data':'Live feed';
  $('board-feed-status').textContent=`${state} · ${meta.coverage_count.toLocaleString()} squares. Last successful check: ${stamp(meta.last_success)}. Last attempt: ${stamp(meta.last_checked)}. Automatic check interval: ${meta.error?meta.retry_interval:meta.refresh_interval}s. ${meta.error||meta.cache_error||''} ${meta.board_endpoint==='authenticated-api'?'Authenticated API board. ':''}${meta.data_warning||''}`;
  document.querySelector('.board-feed').dataset.stale=String(meta.stale);
+ $('refresh-board').title=$('board-feed-status').textContent;
+ if(!$('score-refresh-status').hidden)$('score-refresh-status').textContent=meta.refreshing?'Refreshing MeshWars…':meta.stale?'Using cached data; latest refresh unavailable.':meta.last_success?`Checked ${new Date(meta.last_success*1000).toLocaleTimeString()}`:'Data checked.';
  $('board-route-warning').hidden=!(result && result.board_revision && result.board_revision!==boardRevision);
 }
 async function refreshBoard(full=false){
@@ -1283,18 +1405,19 @@ async function refreshBoard(full=false){
   renderFeedStatus();
   if(!searching)$('submit').disabled=!boardAvailable;
  }catch(error){
-  $('board-feed-status').textContent=`${error.message} ${boardAvailable?'The last loaded board remains available.':''}`;
+  showBoardFeedMessage(`${error.message} ${boardAvailable?'The last loaded board remains available.':''}`);
   document.querySelector('.board-feed').dataset.stale='true';
  }finally{feedLoading=false;}
 }
 $('refresh-board').onclick=async()=>{
  $('refresh-board').disabled=true;
+ showBoardFeedMessage('Requesting data refresh…');
  try{
   const response=await fetch('/api/board/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   if(!response.ok)throw Error('Could not request a refresh. Automatic checks will continue.');
-  $('board-feed-status').textContent='Refresh requested. Checking for updates…';
+  showBoardFeedMessage('Refresh requested. Checking for updates…');
   setTimeout(()=>refreshBoard(),1500);
- }catch(error){$('board-feed-status').textContent=error.message;}
+ }catch(error){showBoardFeedMessage(error.message);}
  finally{setTimeout(()=>{$('refresh-board').disabled=false;},15000);}
 };
 function cancelBlockedRoadDrawing(){
@@ -1778,6 +1901,7 @@ async function init(){
  map=L.map('map',{preferCanvas:true}).setView([40.6,-111.9],10);
  guardMapGestures();
  initCurrentLocation();
+ initDebriefControl();
  const operationsLabel=L.control({position:'bottomleft'});
  operationsLabel.onAdd=()=>{
   const label=L.DomUtil.create('div','map-operations-label');
@@ -1937,6 +2061,7 @@ async function validateTripArea(start,end,waypoints,signal){
 }
 async function planTrip(resuming=null){
  if(searching)return;
+ endDebrief(false);
  let timer=null,invalidStop=null,completed=false,failed=false;
  clearStopErrors();
  try{

@@ -33,6 +33,7 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC0lEQVR42mP8/x8AAw
      if(scenario==='slow-board')await new Promise(resolve=>{releaseBoard=resolve;});
      return reply({available:true,coverage:[],coverage_count:0,source:'fixture',revision:'1',attribution:{configured:false}});
     }
+    if(url.pathname==='/api/board/refresh')return reply({message:'Refresh requested.'});
     if(url.pathname==='/api/version')return reply({version:'development',revision:null,changes:[]});
     if(url.pathname==='/api/players')return reply({available:false,players:[]});
     if(url.pathname==='/api/drives/status')return reply({configured:false});
@@ -83,6 +84,9 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC0lEQVR42mP8/x8AAw
     await page.waitForFunction(()=>boardAvailable&&!document.getElementById('submit').disabled);
     assert.equal(await page.locator('#map-filters #capture-days').count(),1);
     assert.equal(await page.locator('#capture-days').count(),1);
+    assert.equal(await page.locator('#team-scoreboard #refresh-board').count(),1);
+    assert.equal(await page.locator('#sidebar-data').isVisible(),false);
+    assert.equal(await page.locator('[data-sidebar-target="sidebar-data"]').count(),0);
     const alignment=await page.evaluate(()=>({filter:document.getElementById('map-filters').getBoundingClientRect().bottom,map:document.getElementById('map').getBoundingClientRect().top}));
     assert.ok(Math.abs(alignment.filter-alignment.map)<2,'Map filter must sit directly above the map');
     const reconOrder=await page.evaluate(()=>{
@@ -98,6 +102,10 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC0lEQVR42mP8/x8AAw
     await page.locator('.mobile-recon-return').click();
     assert.equal(await page.locator('#recon-workspace').evaluate(el=>el===document.activeElement),true);
     await page.evaluate(()=>window.scrollTo(0,0));
+    await page.locator('#refresh-board').click();
+    await page.waitForFunction(()=>document.getElementById('score-refresh-status').textContent.includes('Refresh requested'));
+    assert.equal(await page.locator('#refresh-board').isDisabled(),true);
+    assert.equal(await page.locator('#score-refresh-status').isVisible(),true);
     fs.mkdirSync(path.join(__dirname,'test-results'),{recursive:true});
     await page.screenshot({path:path.join(__dirname,`test-results/recon-layout-${scenario}.png`)});
 
