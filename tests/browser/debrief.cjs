@@ -61,11 +61,10 @@ const coverage=[...Array.from({length:3},(_,i)=>cell('blue-'+i,'BLUE',-112+i*.00
    assert.equal(await page.locator('#debrief-period').inputValue(),'visit');
    assert.equal(await page.locator('#debrief-team-list li').count(),7);
    const summary=await page.evaluate(()=>buildDebrief('visit'));
-   assert.equal(summary.rows.find(r=>r.team==='BLUE').delta.total,7);
-   assert.equal(summary.rows.find(r=>r.team==='PURPLE').delta.explorer_points,10);
-   assert.equal(summary.rows.find(r=>r.team==='RED').delta.tiles,-1);
+   assert.equal(await page.locator('#debrief-tour-score').count(),0);
+   assert.doesNotMatch(await page.locator('#debrief-team-list').innerText(),/points|pts|score/i);
    assert.equal(summary.rows.reduce((n,r)=>n+r.cells.length,0),6,'Since last visit excludes earlier and future captures');
-   assert.ok(summary.steps.some(s=>s.team==='RED'&&!s.bounds),'Score-only changes must be reviewed without inventing map locations');
+   assert.ok(summary.steps.every(s=>s.bounds&&s.cells.length),'Only actual capture areas belong in the tour');
    fs.mkdirSync(path.join(__dirname,'test-results'),{recursive:true});
    await page.screenshot({path:path.join(__dirname,`test-results/debrief-summary-${width}.png`)});
    await page.selectOption('#debrief-period','2');assert.equal(await page.evaluate(()=>debriefTour.summary.rows.reduce((n,r)=>n+r.cells.length,0)),7);
@@ -73,7 +72,7 @@ const coverage=[...Array.from({length:3},(_,i)=>cell('blue-'+i,'BLUE',-112+i*.00
    await page.locator('#debrief-start').click();
    const savedView=await page.evaluate(()=>({lat:debriefTour.view.center.lat,lng:debriefTour.view.center.lng}));
    assert.equal(await page.locator('#debrief-tour').isVisible(),true);
-   assert.match(await page.locator('#debrief-tour-title').innerText(),/^PURPLE/);
+   assert.match(await page.locator('#debrief-tour-title').innerText(),/^BLUE/);
    assert.ok(await page.evaluate(()=>debriefTour.layer.getLayers().length)>0);
    assert.deepEqual(await page.evaluate(()=>({team:mapTeamFilter,player:mapPlayerFilter,hidden:capturedSquaresHidden,days:captureDays})),filters,'Tour must leave ordinary map filters untouched');
    await page.clock.runFor(1000);
@@ -82,28 +81,20 @@ const coverage=[...Array.from({length:3},(_,i)=>cell('blue-'+i,'BLUE',-112+i*.00
    assert.equal(await page.evaluate(()=>debriefTour.index),0);
    const steps=await page.evaluate(()=>debriefTour.steps.length);
    for(let i=1;i<steps;i++)await page.locator('#debrief-next').click();
-   assert.match(await page.locator('#debrief-tour-captures').innerText(),/No matching capture area/);
-   assert.equal(await page.evaluate(()=>debriefTour.layer.getLayers().length),0);
+   assert.match(await page.locator('#debrief-tour-captures').innerText(),/recent captures currently held/);
+   assert.ok(await page.evaluate(()=>debriefTour.layer.getLayers().length)>0);
    await page.locator('#debrief-next').click();
    assert.equal(await page.locator('#debrief-tour').isVisible(),false);
    assert.ok(await page.evaluate(view=>map.getCenter().distanceTo(view),savedView)<1);
    assert.deepEqual(await page.evaluate(()=>({team:mapTeamFilter,player:mapPlayerFilter,hidden:capturedSquaresHidden,days:captureDays})),filters);
-   const checks=await page.evaluate(()=>{
-    const original=structuredClone(feedMetadata.team_scores),previous=previousDebriefVisit;
-    previousDebriefVisit=null;feedMetadata.team_scores.history=[];
-    const missing=buildDebrief('3');
-    feedMetadata.team_scores.history=[{at:Date.now()/1000-3600,season_id:7,teams:original.teams},original.history.at(-1)];
-    const partial=buildDebrief('3');
-    feedMetadata.team_scores.history=[{...original.history[0],season_id:6},original.history.at(-1)];
-    const season=buildDebrief('3');
-    feedMetadata.team_scores=original;previousDebriefVisit={...previous,seen_at:Date.now()/1000-6*86400};
-    const capped=buildDebrief('visit');previousDebriefVisit=previous;
-    return {unknown:missing.rows.every(r=>r.delta===null),partial:partial.note,seasonUnknown:season.rows.every(r=>r.delta===null),capped:capped.note};
+   const capped=await page.evaluate(()=>{
+    const previous=previousDebriefVisit;previousDebriefVisit={seen_at:Date.now()/1000-6*86400};
+    const note=buildDebrief('visit').note;previousDebriefVisit=previous;return note;
    });
-   assert.equal(checks.unknown,true);assert.match(checks.partial,/Partial score history/);assert.equal(checks.seasonUnknown,true);assert.match(checks.capped,/limited to 3 calendar days/);
+   assert.match(capped,/limited to 3 calendar days/);
    assert.equal(detailRequests,0,'Debrief must use cached board data without cell-by-cell API scans');
    assert.deepEqual(errors,[]);
-   await page.close();console.log(`Passed debrief ${width}px: score deltas, last visit, 1–3 days, all-team areas, score-only steps, history gaps, season isolation, end/restore and scoreboard refresh.`);
+   await page.close();console.log(`Passed debrief ${width}px: capture-only summaries, last visit, 1–3 days, all-team areas, end/restore and scoreboard refresh.`);
   }
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
