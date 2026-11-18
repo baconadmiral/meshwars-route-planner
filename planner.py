@@ -577,7 +577,7 @@ def search_routes(start, end, cells, budget_seconds, router, progress=None, stra
         remaining,excluded=options['remaining'],options['excluded']
         if options.get('week') and options['week']!=places_data.get('week_start'):
             remaining,excluded=100,[]
-        place_scorer=PlaceScorer(places_data,remaining=remaining,excluded=excluded,weight=options['weight'])
+        place_scorer=PlaceScorer(places_data,remaining=remaining,excluded=excluded,weight=options['weight'],excluded_cells=(c['cell_id'] for c in cells if c['owner_team']==team))
     if isinstance(cells,MissionCells):
         cells.baseline_seconds=baseline['duration'];cells.baseline_cells=route_grid_cells(baseline['geometry']['coordinates'])
     scored_base=opportunity_score(baseline,cells, team=team,place_scorer=place_scorer)
@@ -715,7 +715,7 @@ def search_mission_options(start,end,cells,budget_seconds,router,progress=None,w
             pool[key]=route
     first=responses[modes[0]]
     baseline=first['baseline'];places=first['places']
-    scorer=PlaceScorer(places,remaining=places['remaining'],excluded=places['excluded'],weight=options['weight']) if places['enabled'] else None
+    scorer=PlaceScorer(places,remaining=places['remaining'],excluded=places['excluded'],weight=options['weight'],excluded_cells=(c['cell_id'] for c in cells if c['owner_team']==team)) if places['enabled'] else None
     results=[];choices=[];baselines={}
     for mode in modes:
         name,description=MODES[mode]

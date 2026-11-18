@@ -121,13 +121,14 @@ class PlacesFeed:
 
 
 class PlaceScorer:
-    def __init__(self,data,remaining=100,excluded=(),weight=1):
+    def __init__(self,data,remaining=100,excluded=(),weight=1,excluded_cells=()):
         # Lazy import avoids coupling the data adapter to planner initialization.
         from planner import LAT_STEP,LON_STEP,route_grid_cells
         self.data=data
         self.remaining=remaining
         self.weight=weight
         self.excluded=set(excluded)
+        excluded_cells=set(excluded_cells)
         self.by_cell={}
         self.rows={p['id']:dict(p) for p in data.get('places',[])}
         self.candidate_cells={}
@@ -175,6 +176,7 @@ class PlaceScorer:
             if indexed_count+len(cells)>150000:
                 cells=set();self.limited=True;basis='eligibility skipped at indexing limit'
             indexed_count+=len(cells)
+            cells.difference_update(excluded_cells)
             place['eligibility_basis']=basis
             self.candidate_cells[identity]=cells
             for cell in cells:self.by_cell.setdefault(cell,[]).append(place)
