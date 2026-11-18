@@ -810,13 +810,14 @@ function drawBonusPlaces(){
  bonusPlacesLayer.clearLayers();
  for(const place of result?.places?.places||[]){
   const excluded=excludedPlaceIds.has(place.id),type=place.type;
+  const shape=type==='summit'?'<path d="m2 11 4-8 4 8M4 7l2 1 1-2"/>':type==='park'?'<path d="m6 1-4 6h2l-3 3h10L8 7h2L6 1Zm0 9v2"/>':'<path d="m6 1 1.5 3.2 3.5.5-2.5 2.5.6 3.5L6 9l-3.1 1.7.6-3.5L1 4.7l3.5-.5L6 1Z"/>';
   const content=document.createElement('div');
   const title=document.createElement('strong');title.textContent=place.name;
   const note=document.createElement('p');note.textContent=`${type} · ${place.points} potential points. ${type==='summit'?'Peak cell only; surrounding elevation eligibility unavailable.':type==='park'?'Park scoring area is conservatively estimated; no access or coverage is guaranteed.':'Point square plus eight adjacent squares.'}`;
   const button=document.createElement('button');button.type='button';button.textContent=excluded?'Mark as not yet visited':'Already visited this week';button.disabled=searching;button.onclick=()=>markPlaceUsed(place);
   content.append(title,note,button);
   L.marker([place.lat,place.lon],{title:`${place.name}: ${place.points} potential place points`,
-   icon:L.divIcon({className:`bonus-place-icon${excluded?' used':''}`,html:`<span>${type==='summit'?'▲':type==='park'?'♣':'★'}</span>`,iconSize:[24,24],iconAnchor:[12,12]})})
+   icon:L.divIcon({className:`bonus-place-icon${excluded?' used':''}`,html:`<span><svg viewBox="0 0 12 13" aria-hidden="true">${shape}</svg></span>`,iconSize:[24,24],iconAnchor:[12,12]})})
    .addTo(bonusPlacesLayer).bindPopup(content);
  }
 }
