@@ -86,7 +86,7 @@ class MissionModeTests(unittest.TestCase):
         start,end=[.0001,.0001],[.001,.001]
         data={'available':True,'week_start':current_week(),'places':[{'id':1,'name':'Test landmark','type':'landmark','lat':.001,'lon':.001,'points':25,'rotates':True}],'truncated':False}
         kwargs={'mission_mode':'special_ops','places_loader':lambda *args:data,'place_options':{'remaining':10,'weight':2}}
-        result=search_routes(start,end,[cell(0,0,'BLUE')],0,lambda *args:[route([start,end])],**kwargs)
+        result=search_routes(start,end,[cell(0,0,'RED')],0,lambda *args:[route([start,end])],**kwargs)
         r=result['routes'][0]
         self.assertEqual(r['place_bonus'],10)
         self.assertEqual(r['capture_value'],60)

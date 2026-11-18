@@ -55,26 +55,32 @@ class PlaceTests(unittest.TestCase):
         unknown=PlaceScorer(feed(place(kind='park',rotates=False)))
         self.assertEqual(unknown.score({'0_0'})['place_bonus'],0)
 
-    def test_friendly_territory_can_still_earn_place_bonus(self):
+    def test_friendly_territory_is_excluded_from_bonus_scoring_and_proposals(self):
         candidate=road([[.0001,.0001],[.001,.001]])
         cells=[{'cell_id':'0_0','owner_team':'BLUE','scores':{'BLUE':1}}]
-        result=opportunity_score(candidate,cells,place_scorer=PlaceScorer(feed(place()),weight=2))
+        result=opportunity_score(candidate,cells,place_scorer=PlaceScorer(feed(place()),weight=2,excluded_cells=['0_0']))
         self.assertEqual(result['target_count'],0)
         self.assertEqual(result['territory_value'],0)
-        self.assertEqual(result['capture_value'],10)
-        self.assertEqual(result['place_bonus'],5)
+        self.assertEqual(result['capture_value'],0)
+        self.assertEqual(result['place_bonus'],0)
+        scorer=PlaceScorer(feed(place()),excluded_cells=[f'{r}_{c}' for r in range(-1,2) for c in range(-1,2)])
+        self.assertEqual(scorer.proposals([0,0],[.01,0],[],limit=4),[])
+        mixed=PlaceScorer(feed(place()),excluded_cells=['0_0'])
+        self.assertEqual(mixed.score({'0_0'})['place_bonus'],0)
+        self.assertEqual(mixed.score({'0_0','0_1'})['place_bonus'],5)
+        self.assertNotIn('0_0',mixed.candidate_cells[1])
 
     def test_bonus_detour_wins_without_breaking_budget_or_required_stop(self):
         start,end=[.0001,.0001],[.01,.0001]
         required=[.005,.0001]
         data=feed(place(1,row=4,col=1,points=25))
-        cells=[{'cell_id':f'{r}_{c}','owner_team':'BLUE','scores':{'BLUE':1}} for r in range(-2,9) for c in range(-2,8)]
+        cells=[{'cell_id':f'{r}_{c}','owner_team':'RED' if (r,c)==(4,1) else 'BLUE','scores':{'BLUE':1,'RED':1}} for r in range(-2,9) for c in range(-2,8)]
         def router(points,alternatives=False):return [road(points,100 if len(points)==3 else 120)]
         with patch('planner.exploration_points',return_value=[]),patch('planner.insertion_proposals',return_value=[]):
             result=search_routes(start,end,cells,30,router,waypoints=[required],places_loader=lambda *args:data)
         self.assertFalse(result['no_opportunities'])
         self.assertGreater(result['routes'][0]['place_bonus'],0)
-        self.assertEqual(result['routes'][0]['target_count'],0)
+        self.assertGreater(result['routes'][0]['target_count'],0)
         self.assertIn(required,result['routes'][0]['via_points'])
         self.assertLessEqual(result['routes'][0]['duration'],130)
         with patch('planner.exploration_points',return_value=[]),patch('planner.insertion_proposals',return_value=[]):
@@ -84,14 +90,23 @@ class PlaceTests(unittest.TestCase):
     def test_disabled_weight_zero_and_week_change(self):
         loader=lambda *args:feed(place())
         candidate=road([[.0001,.0001],[.001,.001]])
-        cells=[{'cell_id':'0_0','owner_team':'BLUE','scores':{'BLUE':1}}]
+        cells=[{'cell_id':'0_0','owner_team':'RED','scores':{'BLUE':1}}]
         result=search_routes([.0001,.0001],[.001,.001],cells,0,lambda *args:[candidate],places_loader=loader,
                              place_options={'remaining':0,'excluded':[1],'week':'2020-01-01'})
         self.assertEqual(result['routes'][0]['place_bonus'],5)
         self.assertEqual(result['places']['remaining'],100)
         for options in ({'enabled':False},{'weight':0}):
             result=search_routes([.0001,.0001],[.001,.001],cells,0,lambda *args:[candidate],places_loader=loader,place_options=options)
-            self.assertTrue(result['no_opportunities'])
+            self.assertEqual(result['routes'][0]['place_bonus']*options.get('weight',1),0)
+
+    def test_selected_team_controls_bonus_exclusion_in_single_and_all_missions(self):
+        start,end=[.0001,.0001],[.001,.001]
+        rows=[{'cell_id':'0_0','owner_team':'BLUE','scores':{'BLUE':1}}]
+        for mode in ('special_ops','all'):
+            for team,expected in (('BLUE',0),('RED',5)):
+                result=search_routes(start,end,rows,0,lambda *args:[road([start,end])],team=team,mission_mode=mode,places_loader=lambda *args:feed(place()))
+                self.assertTrue(all(route['place_bonus']==expected for route in result['routes']))
+                self.assertEqual(result['baseline']['place_bonus'],expected)
 
     def test_feed_cache_failure_rotation_and_bad_payload(self):
         provider=PlacesFeed()
