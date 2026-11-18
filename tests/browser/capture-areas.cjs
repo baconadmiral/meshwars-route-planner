@@ -97,7 +97,33 @@ const tile=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
     if(rankCaptureAreas([]).length!==0)throw Error('Empty clustering failed');
     if(rankCaptureAreas([c('invalid',NaN,0)]).length!==0)throw Error('Invalid bounds accepted');
    });
-   assert.equal(detailRequests,0,'Capture finder must not trigger individual square API requests');assert.deepEqual(errors,[]);
+   assert.equal(detailRequests,0,'Capture finder must not trigger individual square API requests');
+   await page.evaluate(()=>{
+    const now=Date.now()/1000;
+    board=Array.from({length:3200},(_,i)=>{
+     const row=Math.floor(i/80),col=i%80,team=i%2?'BLUE':'PURPLE';
+     return {cell_id:`regional-${i}`,west:-112+col*.004,south:40.6+row*.003,east:-112+col*.004+.004,north:40.6+row*.003+.003,owner_team:team,captured_at:now-60,captured_by:'Regional',scores:{[team]:1}};
+    });
+    mapTeamFilter=null;mapPlayerFilter='';captureDays=0;capturedSquaresHidden=false;
+    map.setView([40.66,-111.84],8,{animate:false});drawBoard();
+   });
+   assert.equal(await page.evaluate(()=>territories.getLayers().length),3200,'Regional view must retain every square above the former 2500 cutoff');
+   await page.locator('#map').scrollIntoViewIfNeeded();
+   await page.evaluate(()=>{map.invalidateSize({pan:false});map.setView([40.66,-111.84],8,{animate:false});drawBoard();});
+   await page.waitForTimeout(200);
+   assert.equal(await page.evaluate(()=>{const c=territories.getLayers()[0]._renderer._container;return c.getContext('2d').getImageData(0,0,c.width,c.height).data.some(v=>v>0);}),true,'Regional squares must actually paint pixels');
+   await page.screenshot({path:path.join(__dirname,`test-results/regional-captures-${width}.png`)});
+   assert.equal(await page.evaluate(()=>territories.getLayers()[0]._renderer instanceof L.Canvas),true);
+   await page.evaluate(()=>{map.setView([40.66,-111.84],6,{animate:false});drawBoard();});
+   assert.equal(await page.evaluate(()=>territories.getLayers().length),3200);
+   await page.evaluate(()=>{mapTeamFilter='BLUE';drawBoard();});
+   assert.equal(await page.evaluate(()=>territories.getLayers().length),1600);
+   await page.evaluate(()=>{capturedSquaresHidden=true;drawBoard();});
+   assert.equal(await page.evaluate(()=>territories.getLayers().length),0);
+   await page.evaluate(()=>{capturedSquaresHidden=false;mapTeamFilter=null;map.setView([40.66,-111.84],14,{animate:false});drawBoard();});
+   assert.ok(await page.evaluate(()=>territories.getLayers().length)>0);
+   assert.equal(detailRequests,0,'Regional drawing must not enable cell-detail API requests');
+   assert.deepEqual(errors,[]);
    await page.close();console.log(`Passed capture areas at ${width}px: ranked global groups, team/date filters, next/wrap, all matches, invalidation, empty/hidden states and date line.`);
   }
  }finally{await browser.close();}

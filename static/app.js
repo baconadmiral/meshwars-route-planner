@@ -431,7 +431,7 @@ function squareStyle(cell){
   return Math.round(channel*(darkMode ? .9 : .85)*(1-.12*contrast*strength));
  });
  const scoreOpacity=(1-contrast)+contrast*(.12+.88*strength);
- return {color:base,stroke:intensity===0,weight:.6,opacity:.4,
+ return {color:base,smoothFactor:0,stroke:intensity===0,weight:.6,opacity:.4,
          fillColor:`rgb(${rgb.join(',')})`,fillOpacity:intensity*scoreOpacity};
 }
 function captureVisible(cell,now=Date.now()/1000){
@@ -546,7 +546,7 @@ function drawBoard(){
  $('capture-filter-status').textContent=`${capturedSquaresHidden?'Captured-square overlay hidden. ':''}${matching.length.toLocaleString()} of ${board.length.toLocaleString()} squares match the display filters for ${mapTeamFilter||'all teams'}${mapPlayerFilter?' · '+(mapPlayerFilter==='__unknown__'?'unknown capturer':mapPlayerFilter):''}.${captureDays>0?' Missing or future capture times are hidden.':''}`;
  const visible=eligible.filter(c=>bounds.intersects([[c.south,c.west],[c.north,c.east]]));
  if(targets && result?.routes?.[routeIndex])drawRouteTargets(result.routes[routeIndex]);
- if(visible.length>2500){return;}
+ // Canvas rendering keeps the full visible board available at regional zooms.
  for(const c of visible){
   const rect=L.rectangle([[c.south,c.west],[c.north,c.east]],squareStyle(c)).addTo(territories);
   rect.squareData=c;
