@@ -13,7 +13,7 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
  const browser=await chromium.launch({headless:true});
  try{
   for(const scenario of [{name:'no-area',area:null},{name:'box',area:box},
-      {name:'polygon',area:polygon},{name:'mission-fortify',area:null,mission:'fortify'},{name:'wild-routes',area:null,wild:true},{name:'place-bonus',area:box,bonus:true},{name:'mobile-polygon',area:polygon,mobile:true},
+      {name:'polygon',area:polygon},{name:'mission-fortify',area:null,mission:'fortify'},{name:'wild-routes',area:null,wild:true},{name:'place-bonus',area:box,bonus:true},{name:'mobile-place-bonus',area:box,bonus:true,mobile:true},{name:'mobile-polygon',area:polygon,mobile:true},
       {name:'preview-unavailable',area:box,failPreview:true}]){
    const page=await browser.newPage({viewport:scenario.mobile?{width:390,height:844}:{width:1280,height:1000}});
    page.setDefaultTimeout(5000);
@@ -238,6 +238,9 @@ const polygon={type:'Polygon',coordinates:[[[-.01,-.01],[.03,-.01],[.03,.03],[0,
    }
    if(scenario.bonus){
     assert.equal(await page.locator('.bonus-place-icon').count(),1);
+    await page.locator('#map').scrollIntoViewIfNeeded();
+    const markerOutput=path.join(__dirname,'test-results');fs.mkdirSync(markerOutput,{recursive:true});
+    await page.screenshot({path:path.join(markerOutput,`places-${scenario.mobile?'mobile':'desktop'}.png`)});
     assert.match(await page.locator('.route-place-bonus').innerText(),/25 points/);
     await page.locator('[data-used-place="42"]').click();
     assert.equal(await page.evaluate(()=>excludedPlaceIds.has(42)),true);
