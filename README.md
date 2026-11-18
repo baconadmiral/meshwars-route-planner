@@ -165,7 +165,7 @@ The route plan and divider stay hidden until a search returns routes, giving the
 
 Drag the **Map / route plan** divider up or down to change the panel sizes. The sidebar and route plan scroll independently on desktop, keeping the map visible. Your split is remembered in this browser. Focus the divider and use Up/Down arrows (Shift for larger steps), Home/End for minimum/maximum map size, or double-click to reset. Touch dragging is supported. Printed directions use a fixed map height and expand the full route plan.
 
-The map shows team-colored cells with score-based faint-to-bold fills, visually capped at 3 points; hover to see the full holding score and recorded capture time. Missing scores are labeled unknown. Cells are drawn when fewer than 2,501 known squares are in view; zoom in if territory is hidden. Gray indicates the fastest baseline, and blue indicates the selected route.
+The map shows team-colored cells with score-based faint-to-bold fills, visually capped at 3 points; hover to see the full holding score and recorded capture time. Missing scores are labeled unknown. Cells remain visible at regional zooms, including views with more than 2,500 squares, using the canvas renderer. Gray indicates the fastest baseline, and blue indicates the selected route.
 
 ## Mobile progress and reconnectable searches
 
@@ -508,3 +508,5 @@ Hiding captured squares does not remove them from Recon calculations: Recon swee
 **Debrief** beside the scores reviews **Since last visit** (when available), **Today**, **Yesterday + today**, or **Last 3 days**, using local calendar boundaries. It summarizes recent captures currently held and tours capture areas for every team using Recon sweep grouping. Previous/Next walks the areas; Finish or End restores the map view. Temporary highlights leave normal team, player and capture-display filters unchanged. It makes no square-detail API scans.
 
 The browser remembers its last visible check for the next visit; since-visit reviews are capped at three calendar days. Debrief shows captures from current ownership and recorded capture times, not score changes or a complete event ledger. Captures later lost and visits without a new capture may be absent.
+
+Captured squares remain visible at regional zoom levels even when more than 2,500 squares are in view. Square geometry simplification is disabled so small cells retain their fills. The canvas-rendered overlay uses the already-loaded board and retains team/player/date/visibility filters and square popups; zooming out does not trigger additional square-detail API requests.
